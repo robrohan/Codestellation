@@ -33,6 +33,21 @@ if(EXISTS ${ts_c_SOURCE_DIR}/src/scanner.c)
 endif()
 target_include_directories(tree_sitter_c PUBLIC ${ts_c_SOURCE_DIR}/src)
 
+# --- tree-sitter-c-sharp grammar (Phase 3) --------------------------------
+# Large generated parser.c (tens of MB) -- shallow clone pinned to a tag
+# keeps this cheap.
+FetchContent_Declare(ts_csharp
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-c-sharp
+    GIT_TAG v0.23.5
+    GIT_SHALLOW TRUE
+)
+FetchContent_Populate(ts_csharp)
+add_library(tree_sitter_csharp STATIC ${ts_csharp_SOURCE_DIR}/src/parser.c)
+if(EXISTS ${ts_csharp_SOURCE_DIR}/src/scanner.c)
+    target_sources(tree_sitter_csharp PRIVATE ${ts_csharp_SOURCE_DIR}/src/scanner.c)
+endif()
+target_include_directories(tree_sitter_csharp PUBLIC ${ts_csharp_SOURCE_DIR}/src)
+
 # --- GLFW (window/input/GL context, cross-platform) ----------------------
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)

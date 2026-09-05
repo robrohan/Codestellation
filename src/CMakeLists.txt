@@ -13,7 +13,7 @@ add_executable(codemap-build
 )
 
 target_include_directories(codemap-build PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(codemap-build PRIVATE tree-sitter tree_sitter_c)
+target_link_libraries(codemap-build PRIVATE tree-sitter tree_sitter_c tree_sitter_csharp)
 
 add_executable(codemap-view
     render/main.c
