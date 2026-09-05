@@ -2,13 +2,17 @@
 #include <math.h>
 
 #define PITCH_LIMIT 1.5f /* radians, just short of +/- pi/2 */
+/* M_PI isn't standard C -- glibc/macOS expose it as an extension, but
+ * MSVC doesn't define it without _USE_MATH_DEFINES. Spelling it out
+ * avoids the dependency entirely. */
+#define CODEMAP_PI 3.14159265358979323846f
 
 void camera_init(Camera *cam) {
     cam->target = (Vec3){ 0, 0, 0 };
     cam->yaw = 0.0f;
     cam->pitch = 0.3f;
     cam->distance = 12.0f;
-    cam->fovy = 60.0f * (float)M_PI / 180.0f;
+    cam->fovy = 60.0f * CODEMAP_PI / 180.0f;
 }
 
 void camera_orbit(Camera *cam, float dyaw, float dpitch) {

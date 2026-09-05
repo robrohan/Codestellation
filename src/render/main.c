@@ -77,6 +77,12 @@ int main(int argc, char **argv) {
     glfwMakeContextCurrent(win);
     glfwSwapInterval(1);
 
+    if (!gl_load(glfwGetProcAddress)) {
+        fprintf(stderr, "error: failed to load GL functions\n");
+        glfwTerminate();
+        return 1;
+    }
+
     struct nk_glfw glfw_nk = { 0 };
     struct nk_context *ctx = nk_glfw3_init(&glfw_nk, win, NK_GLFW3_INSTALL_CALLBACKS);
     {
