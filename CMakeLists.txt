@@ -7,6 +7,16 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
+# tree-sitter's own CMakeLists.txt does `option(BUILD_SHARED_LIBS ... ON)`,
+# which -- being a CACHE variable -- silently turns on shared-library
+# building for every FetchContent dependency pulled in after it (GLFW
+# included), not just tree-sitter itself. On Windows that's fatal: none of
+# tree-sitter's public symbols carry __declspec(dllexport), so MSVC emits
+# the .dll but no import .lib, and anything linking against it fails with
+# LNK1181. Force static everywhere before any dependency gets a chance to
+# flip this.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
 include(FetchContent)
 
 # --- tree-sitter core runtime -------------------------------------------
