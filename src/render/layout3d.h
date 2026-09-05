@@ -12,4 +12,9 @@
  * a Barnes-Hut approximation would be the scale-up path, not needed yet. */
 void layout3d_compute(const Graph *g, Vec3 *out_positions, int iterations);
 
+/* Max distance from the origin across all positions -- used to pick an
+ * initial camera distance that actually frames the graph, since layouts
+ * range from a handful of nodes to thousands. */
+float layout3d_bounding_radius(const Vec3 *positions, size_t count);
+
 #endif

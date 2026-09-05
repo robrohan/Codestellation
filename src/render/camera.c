@@ -24,7 +24,7 @@ void camera_orbit(Camera *cam, float dyaw, float dpitch) {
 
 void camera_zoom(Camera *cam, float delta) {
     cam->distance -= delta;
-    if (cam->distance < 0.5f) cam->distance = 0.5f;
+    if (cam->distance < 0.05f) cam->distance = 0.05f;
     if (cam->distance > 500.0f) cam->distance = 500.0f;
 }
 

@@ -74,6 +74,18 @@ void layout3d_compute(const Graph *g, Vec3 *out_positions, int iterations) {
             disp[t] = vec3_add(disp[t], vec3_scale(dir, force));
         }
 
+        /* Mild pull toward the centroid. Most node pairs in a real
+         * dependency graph aren't directly connected, so repulsion
+         * (summed over all O(n) other nodes) heavily outweighs
+         * attraction (summed over just each node's own edges) --
+         * without this, a sparse graph's whole cluster expands roughly
+         * unbounded instead of settling at the equilibrium size the
+         * repulsion/attraction balance is supposed to produce. */
+        const float gravity = 1.0f;
+        for (size_t i = 0; i < n; i++) {
+            disp[i] = vec3_sub(disp[i], vec3_scale(out_positions[i], gravity));
+        }
+
         for (size_t i = 0; i < n; i++) {
             float len = vec3_length(disp[i]);
             if (len > 0.01f) {
@@ -86,4 +98,22 @@ void layout3d_compute(const Graph *g, Vec3 *out_positions, int iterations) {
     }
 
     free(disp);
+
+    /* Repulsion + attraction alone don't hold the barycenter still --
+     * asymmetric edge distribution lets the whole cluster drift away
+     * from the origin over many iterations. Recenter so the graph ends
+     * up where the camera/axis gizmo actually expect it: at (0,0,0). */
+    Vec3 centroid = { 0, 0, 0 };
+    for (size_t i = 0; i < n; i++) centroid = vec3_add(centroid, out_positions[i]);
+    centroid = vec3_scale(centroid, 1.0f / (float)n);
+    for (size_t i = 0; i < n; i++) out_positions[i] = vec3_sub(out_positions[i], centroid);
+}
+
+float layout3d_bounding_radius(const Vec3 *positions, size_t count) {
+    float max_dist = 0.0f;
+    for (size_t i = 0; i < count; i++) {
+        float d = vec3_length(positions[i]);
+        if (d > max_dist) max_dist = d;
+    }
+    return max_dist;
 }

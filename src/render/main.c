@@ -30,6 +30,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 #define MAX_VERTEX_BUFFER (512 * 1024)
 #define MAX_ELEMENT_BUFFER (128 * 1024)
@@ -99,6 +100,15 @@ int main(int argc, char **argv) {
 
     Camera camera;
     camera_init(&camera);
+    {
+        /* Fixed-distance default framed empty graphs badly and huge ones
+         * worse -- frame the actual data instead. A sphere of `radius`
+         * exactly fills the vertical field of view at
+         * distance = radius / sin(fovy/2); back off another 20% so
+         * boundary nodes aren't clipped right at the frustum edge. */
+        float radius = layout3d_bounding_radius(positions, graph.node_count);
+        if (radius > 0.1f) camera.distance = (radius / sinf(camera.fovy * 0.5f)) * 1.2f;
+    }
 
     int selected = -1;
     InteractMode interact = INTERACT_NONE;
