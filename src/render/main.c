@@ -1,8 +1,6 @@
-/* Phase 2 skeleton: confirms GLFW + GL 3.3 core (+ macOS forward-compat) +
- * Nuklear all work together before any real graph data enters the picture.
- * Draws a handful of hardcoded points/lines and a static Nuklear side
- * panel. Real layout (layout3d.c), scene rendering (gl_scene.c), and the
- * file-content panel (ui_panel.c) come in later phases. */
+/* codemap-view: loads a graph.json (see graph/graph_json.h), lays it out
+ * in 3D once at startup, and renders it as a navigable point/line scene
+ * with a Nuklear side panel for inspecting a selected file's contents. */
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -20,77 +18,46 @@
 #include "nuklear.h"
 #include "nuklear_glfw_gl3.h"
 
+#include "mat4.h"
+#include "camera.h"
+#include "layout3d.h"
+#include "gl_scene.h"
+#include "picking.h"
+#include "ui_panel.h"
+#include "../graph/graph.h"
+#include "../graph/graph_json.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 
 #define MAX_VERTEX_BUFFER (512 * 1024)
 #define MAX_ELEMENT_BUFFER (128 * 1024)
+#define PICK_RADIUS_PX 10.0f
 
-/* --- minimal hardcoded point/line scene, just to prove our own GL calls
- * (not only Nuklear's) work under this context --- */
+typedef enum { INTERACT_NONE, INTERACT_ORBIT, INTERACT_DRAG } InteractMode;
 
-static const char *POINT_VERT_SRC =
-    "#version 330 core\n"
-    "layout(location = 0) in vec3 a_pos;\n"
-    "void main() {\n"
-    "    gl_Position = vec4(a_pos, 1.0);\n"
-    "    gl_PointSize = 10.0;\n"
-    "}\n";
-
-static const char *POINT_FRAG_SRC =
-    "#version 330 core\n"
-    "uniform vec4 u_color;\n"
-    "out vec4 frag_color;\n"
-    "void main() { frag_color = u_color; }\n";
-
-static GLuint compile_shader(GLenum type, const char *src) {
-    GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &src, NULL);
-    glCompileShader(shader);
-    GLint ok = 0;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
-    if (!ok) {
-        char log[512];
-        glGetShaderInfoLog(shader, sizeof(log), NULL, log);
-        fprintf(stderr, "shader compile error: %s\n", log);
+int main(int argc, char **argv) {
+    if (argc < 2) {
+        fprintf(stderr, "usage: %s <graph.json>\n", argv[0]);
+        return 1;
     }
-    return shader;
-}
 
-static GLuint link_program(const char *vert_src, const char *frag_src) {
-    GLuint vert = compile_shader(GL_VERTEX_SHADER, vert_src);
-    GLuint frag = compile_shader(GL_FRAGMENT_SHADER, frag_src);
-    GLuint prog = glCreateProgram();
-    glAttachShader(prog, vert);
-    glAttachShader(prog, frag);
-    glLinkProgram(prog);
-    GLint ok = 0;
-    glGetProgramiv(prog, GL_LINK_STATUS, &ok);
-    if (!ok) {
-        char log[512];
-        glGetProgramInfoLog(prog, sizeof(log), NULL, log);
-        fprintf(stderr, "program link error: %s\n", log);
+    Graph graph;
+    if (!graph_read_json(argv[1], &graph)) {
+        fprintf(stderr, "error: could not read %s\n", argv[1]);
+        return 1;
     }
-    glDeleteShader(vert);
-    glDeleteShader(frag);
-    return prog;
-}
+    printf("loaded %zu nodes, %zu edges from %s\n", graph.node_count, graph.edge_count, argv[1]);
 
-/* 5 dummy points in NDC space, roughly forming a small cluster + one
- * outlier, connected by a couple of lines -- stand-ins for real graph
- * nodes/edges until layout3d.c exists. */
-static const float DUMMY_POINTS[] = {
-    -0.3f,  0.2f, 0.0f,
-     0.1f,  0.4f, 0.0f,
-     0.2f, -0.1f, 0.0f,
-    -0.2f, -0.3f, 0.0f,
-     0.6f,  0.5f, 0.0f,
-};
-static const unsigned int DUMMY_LINE_INDICES[] = {
-    0, 1,  1, 2,  2, 3,  3, 0,  1, 4,
-};
+    Vec3 *positions = (Vec3 *)malloc(graph.node_count * sizeof(Vec3));
+    layout3d_compute(&graph, positions, 300);
 
-int main(void) {
+    unsigned int *edge_indices = (unsigned int *)malloc(graph.edge_count * 2 * sizeof(unsigned int));
+    for (size_t i = 0; i < graph.edge_count; i++) {
+        edge_indices[i * 2 + 0] = (unsigned int)graph.edges[i].source;
+        edge_indices[i * 2 + 1] = (unsigned int)graph.edges[i].target;
+    }
+
     if (!glfwInit()) {
         fprintf(stderr, "error: glfwInit failed\n");
         return 1;
@@ -101,7 +68,7 @@ int main(void) {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 
-    GLFWwindow *win = glfwCreateWindow(1280, 800, "codemap3d (phase 2 skeleton)", NULL, NULL);
+    GLFWwindow *win = glfwCreateWindow(1280, 800, "codemap3d", NULL, NULL);
     if (!win) {
         fprintf(stderr, "error: glfwCreateWindow failed\n");
         glfwTerminate();
@@ -110,31 +77,28 @@ int main(void) {
     glfwMakeContextCurrent(win);
     glfwSwapInterval(1);
 
-    struct nk_glfw glfw = {0};
-    struct nk_context *ctx = nk_glfw3_init(&glfw, win, NK_GLFW3_INSTALL_CALLBACKS);
+    struct nk_glfw glfw_nk = { 0 };
+    struct nk_context *ctx = nk_glfw3_init(&glfw_nk, win, NK_GLFW3_INSTALL_CALLBACKS);
     {
         struct nk_font_atlas *atlas;
-        nk_glfw3_font_stash_begin(&glfw, &atlas);
-        nk_glfw3_font_stash_end(&glfw);
+        nk_glfw3_font_stash_begin(&glfw_nk, &atlas);
+        nk_glfw3_font_stash_end(&glfw_nk);
     }
 
-    GLuint prog = link_program(POINT_VERT_SRC, POINT_FRAG_SRC);
-    GLint u_color = glGetUniformLocation(prog, "u_color");
+    GLScene scene;
+    gl_scene_init(&scene);
+    gl_scene_upload(&scene, (const float *)positions, graph.node_count, edge_indices, graph.edge_count);
 
-    GLuint vao, vbo, ebo;
-    glGenVertexArrays(1, &vao);
-    glGenBuffers(1, &vbo);
-    glGenBuffers(1, &ebo);
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(DUMMY_POINTS), DUMMY_POINTS, GL_STATIC_DRAW);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(DUMMY_LINE_INDICES), DUMMY_LINE_INDICES, GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
-    glEnableVertexAttribArray(0);
-    glBindVertexArray(0);
+    Camera camera;
+    camera_init(&camera);
+
+    int selected = -1;
+    InteractMode interact = INTERACT_NONE;
+    double last_mouse_x = 0, last_mouse_y = 0;
+    Vec3 drag_plane_normal = { 0, 0, 1 };
 
     glEnable(GL_PROGRAM_POINT_SIZE);
+    glEnable(GL_DEPTH_TEST);
 
     while (!glfwWindowShouldClose(win)) {
         glfwPollEvents();
@@ -144,39 +108,79 @@ int main(void) {
 
         int width, height;
         glfwGetWindowSize(win, &width, &height);
+        float aspect = height > 0 ? (float)width / (float)height : 1.0f;
 
-        nk_glfw3_new_frame(&glfw);
-        if (nk_begin(ctx, "Inspector", nk_rect((float)width - 320, 0, 320, (float)height),
-                     NK_WINDOW_BORDER | NK_WINDOW_TITLE)) {
-            nk_layout_row_dynamic(ctx, 20, 1);
-            nk_label(ctx, "codemap3d", NK_TEXT_LEFT);
-            nk_label(ctx, "Phase 2: window + Nuklear skeleton", NK_TEXT_LEFT);
-            nk_label(ctx, "Click a node to inspect its file here.", NK_TEXT_LEFT);
+        float view[16], proj[16], view_proj[16];
+        camera_view_matrix(&camera, view);
+        mat4_perspective(proj, camera.fovy, aspect, 0.05f, 1000.0f);
+        mat4_multiply(view_proj, proj, view);
+
+        double mx, my;
+        glfwGetCursorPos(win, &mx, &my);
+        bool over_panel = mx >= (double)(width - UI_PANEL_WIDTH);
+        int left_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT);
+
+        if (left_state == GLFW_PRESS && interact == INTERACT_NONE && !over_panel) {
+            int hit = pick_nearest_node(view_proj, positions, graph.node_count, width, height,
+                                         (float)mx, (float)my, PICK_RADIUS_PX);
+            if (hit >= 0) {
+                selected = hit;
+                interact = INTERACT_DRAG;
+                Vec3 forward, right, up;
+                camera_basis(&camera, &forward, &right, &up);
+                drag_plane_normal = forward;
+            } else {
+                interact = INTERACT_ORBIT;
+            }
+            last_mouse_x = mx;
+            last_mouse_y = my;
+        } else if (left_state == GLFW_RELEASE) {
+            interact = INTERACT_NONE;
+        } else if (interact != INTERACT_NONE) {
+            double dx = mx - last_mouse_x;
+            double dy = my - last_mouse_y;
+
+            if (interact == INTERACT_ORBIT) {
+                camera_orbit(&camera, (float)dx * -0.005f, (float)dy * -0.005f);
+            } else if (interact == INTERACT_DRAG && selected >= 0) {
+                float ndc_x = (2.0f * (float)mx / (float)width) - 1.0f;
+                float ndc_y = 1.0f - (2.0f * (float)my / (float)height);
+                Vec3 ray_origin, ray_dir;
+                camera_ray(&camera, ndc_x, ndc_y, aspect, &ray_origin, &ray_dir);
+                Vec3 new_pos;
+                if (ray_plane_intersect(ray_origin, ray_dir, positions[selected], drag_plane_normal, &new_pos)) {
+                    positions[selected] = new_pos;
+                    gl_scene_update_positions(&scene, (const float *)positions, graph.node_count);
+                }
+            }
+            last_mouse_x = mx;
+            last_mouse_y = my;
         }
-        nk_end(ctx);
+
+        nk_glfw3_new_frame(&glfw_nk);
+        {
+            const char *sel_path = selected >= 0 ? graph.nodes[selected].path : NULL;
+            const char *sel_lang = selected >= 0 ? graph.nodes[selected].language : NULL;
+            ui_panel_draw(ctx, width, height, sel_path, sel_lang);
+        }
 
         glViewport(0, 0, width, height);
         glClearColor(0.09f, 0.09f, 0.11f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        glUseProgram(prog);
-        glBindVertexArray(vao);
-        glUniform4f(u_color, 0.35f, 0.75f, 0.95f, 1.0f);
-        glDrawElements(GL_LINES, sizeof(DUMMY_LINE_INDICES) / sizeof(unsigned int), GL_UNSIGNED_INT, 0);
-        glUniform4f(u_color, 1.0f, 0.85f, 0.3f, 1.0f);
-        glDrawArrays(GL_POINTS, 0, sizeof(DUMMY_POINTS) / (3 * sizeof(float)));
-        glBindVertexArray(0);
+        gl_scene_draw(&scene, view_proj, selected);
 
-        nk_glfw3_render(&glfw, NK_ANTI_ALIASING_ON, MAX_VERTEX_BUFFER, MAX_ELEMENT_BUFFER);
+        nk_glfw3_render(&glfw_nk, NK_ANTI_ALIASING_ON, MAX_VERTEX_BUFFER, MAX_ELEMENT_BUFFER);
         glfwSwapBuffers(win);
     }
 
-    glDeleteProgram(prog);
-    glDeleteBuffers(1, &vbo);
-    glDeleteBuffers(1, &ebo);
-    glDeleteVertexArrays(1, &vao);
-
-    nk_glfw3_shutdown(&glfw);
+    gl_scene_destroy(&scene);
+    ui_panel_shutdown();
+    nk_glfw3_shutdown(&glfw_nk);
     glfwTerminate();
+
+    free(positions);
+    free(edge_indices);
+    graph_free(&graph);
     return 0;
 }
