@@ -1,4 +1,5 @@
 #include "symtab.h"
+#include "pathutil.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -10,13 +11,6 @@ struct SymbolTable {
     size_t capacity;
     size_t count;
 };
-
-static char *xstrdup(const char *s) {
-    size_t n = strlen(s) + 1;
-    char *p = (char *)malloc(n);
-    memcpy(p, s, n);
-    return p;
-}
 
 static uint64_t fnv1a(const char *s) {
     uint64_t h = 1469598103934665603ULL;

@@ -3,6 +3,10 @@
 
 #include <stdbool.h>
 
+/* malloc'd copy of s; caller frees. Used throughout instead of libc
+ * strdup, which isn't available without an underscore prefix on MSVC. */
+char *xstrdup(const char *s);
+
 /* All returned strings are malloc'd; caller frees. */
 char *path_join(const char *dir, const char *rel);
 char *path_dirname(const char *path);

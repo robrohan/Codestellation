@@ -6,13 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static char *xstrdup(const char *s) {
-    size_t n = strlen(s) + 1;
-    char *p = (char *)malloc(n);
-    memcpy(p, s, n);
-    return p;
-}
-
 static char *read_file(const char *path, uint32_t *out_len) {
     FILE *f = fopen(path, "rb");
     if (!f) return NULL;

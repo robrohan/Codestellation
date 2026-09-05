@@ -31,6 +31,7 @@
 
 #include "csharp_adapter.h"
 #include "../../common/symtab.h"
+#include "../../common/pathutil.h"
 #include <tree_sitter/api.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,13 +40,6 @@
 extern const TSLanguage *tree_sitter_c_sharp(void);
 
 static const char *CSHARP_EXTENSIONS[] = { ".cs", NULL };
-
-static char *xstrdup(const char *s) {
-    size_t n = strlen(s) + 1;
-    char *p = (char *)malloc(n);
-    memcpy(p, s, n);
-    return p;
-}
 
 /* strndup isn't universally available (no MSVC), so a local copy. */
 static char *strndup_local(const char *s, size_t n) {

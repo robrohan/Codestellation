@@ -1,18 +1,12 @@
 #include "resolve.h"
 #include "../common/symtab.h"
+#include "../common/pathutil.h"
 #include "../lang/adapter.h"
 #include <stdlib.h>
 #include <string.h>
 
 typedef struct { SymbolTable *table; int file_id; } DeclCtx;
 typedef struct { RefFact *items; size_t count, cap; } RefList;
-
-static char *xstrdup(const char *s) {
-    size_t n = strlen(s) + 1;
-    char *p = (char *)malloc(n);
-    memcpy(p, s, n);
-    return p;
-}
 
 static void decl_sink(void *ctx_, const DeclFact *fact) {
     DeclCtx *ctx = (DeclCtx *)ctx_;

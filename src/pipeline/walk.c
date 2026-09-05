@@ -4,13 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static char *xstrdup(const char *s) {
-    size_t n = strlen(s) + 1;
-    char *p = (char *)malloc(n);
-    memcpy(p, s, n);
-    return p;
-}
-
 void filelist_init(FileList *list) {
     list->paths = NULL;
     list->count = 0;

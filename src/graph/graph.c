@@ -1,13 +1,7 @@
 #include "graph.h"
+#include "../common/pathutil.h"
 #include <stdlib.h>
 #include <string.h>
-
-static char *xstrdup(const char *s) {
-    size_t n = strlen(s) + 1;
-    char *p = (char *)malloc(n);
-    memcpy(p, s, n);
-    return p;
-}
 
 void graph_init(Graph *g) {
     memset(g, 0, sizeof(*g));
