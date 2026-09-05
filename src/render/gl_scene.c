@@ -5,6 +5,7 @@
 #include "gl_scene.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 static const char *VERT_SRC =
     "#version 330 core\n"
@@ -62,6 +63,7 @@ void gl_scene_init(GLScene *scene) {
     glGenVertexArrays(1, &scene->vao);
     glGenBuffers(1, &scene->vbo);
     glGenBuffers(1, &scene->ebo);
+    glGenBuffers(1, &scene->highlight_ebo);
 
     glBindVertexArray(scene->vao);
     glBindBuffer(GL_ARRAY_BUFFER, scene->vbo);
@@ -70,12 +72,16 @@ void gl_scene_init(GLScene *scene) {
     /* The element-buffer binding is part of VAO state (unlike GL_ARRAY_BUFFER),
      * so it has to be bound here, while this VAO is current -- binding it later
      * in gl_scene_upload (with no VAO bound) would attach it to VAO 0 instead,
-     * leaving this VAO with no index buffer and silently drawing zero lines. */
+     * leaving this VAO with no index buffer and silently drawing zero lines.
+     * gl_scene_draw explicitly rebinds whichever of ebo/highlight_ebo it
+     * needs before each glDrawElements call, so the binding made here is
+     * just the initial default. */
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, scene->ebo);
     glBindVertexArray(0);
 
     scene->edge_index_count = 0;
     scene->point_count = 0;
+    scene->highlight_index_count = 0;
 
     /* Axis gizmo: 3 segments (origin -> X/Y/Z). Re-uploaded (6 floats*3,
      * trivially cheap) each gl_scene_draw_axis call rather than cached,
@@ -106,13 +112,34 @@ void gl_scene_update_positions(GLScene *scene, const float *positions, size_t po
     glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)(point_count * 3 * sizeof(float)), positions);
 }
 
+void gl_scene_set_highlighted_edges(GLScene *scene, const unsigned int *edge_indices, size_t edge_count) {
+    scene->highlight_index_count = (GLsizei)(edge_count * 2);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, scene->highlight_ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(edge_count * 2 * sizeof(unsigned int)), edge_indices, GL_DYNAMIC_DRAW);
+}
+
 void gl_scene_draw(const GLScene *scene, const float *mvp, int highlight_index) {
     glUseProgram(scene->prog);
     glUniformMatrix4fv(scene->u_mvp, 1, GL_FALSE, mvp);
     glBindVertexArray(scene->vao);
 
-    glUniform4f(scene->u_color, 0.30f, 0.55f, 0.75f, 0.8f);
+    /* No blending is enabled anywhere in this renderer, so "fade" is done
+     * by dimming the RGB itself rather than via alpha -- simpler than
+     * introducing blend-state management for one effect. */
+    bool has_highlight = highlight_index >= 0;
+    if (has_highlight) {
+        glUniform4f(scene->u_color, 0.30f * 0.25f, 0.55f * 0.25f, 0.75f * 0.25f, 1.0f);
+    } else {
+        glUniform4f(scene->u_color, 0.30f, 0.55f, 0.75f, 1.0f);
+    }
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, scene->ebo);
     glDrawElements(GL_LINES, scene->edge_index_count, GL_UNSIGNED_INT, 0);
+
+    if (has_highlight && scene->highlight_index_count > 0) {
+        glUniform4f(scene->u_color, 0.35f, 0.75f, 1.0f, 1.0f);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, scene->highlight_ebo);
+        glDrawElements(GL_LINES, scene->highlight_index_count, GL_UNSIGNED_INT, 0);
+    }
 
     glUniform4f(scene->u_color, 1.0f, 0.82f, 0.25f, 1.0f);
     glDrawArrays(GL_POINTS, 0, scene->point_count);
@@ -152,6 +179,7 @@ void gl_scene_destroy(GLScene *scene) {
     glDeleteProgram(scene->prog);
     glDeleteBuffers(1, &scene->vbo);
     glDeleteBuffers(1, &scene->ebo);
+    glDeleteBuffers(1, &scene->highlight_ebo);
     glDeleteVertexArrays(1, &scene->vao);
     glDeleteBuffers(1, &scene->axis_vbo);
     glDeleteVertexArrays(1, &scene->axis_vao);

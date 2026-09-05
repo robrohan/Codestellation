@@ -39,6 +39,29 @@
 
 typedef enum { INTERACT_NONE, INTERACT_ORBIT, INTERACT_DRAG, INTERACT_PAN } InteractMode;
 
+/* Rebuilds the GPU's "highlighted edges" buffer to just the edges
+ * touching `node_id` (or clears it if node_id < 0). Only called when
+ * the selection actually changes, not every frame -- the edge count is
+ * small enough that per-frame rebuilding would be fine too, but there's
+ * no reason to. */
+static void rebuild_highlighted_edges(GLScene *scene, const Graph *graph, int node_id) {
+    if (node_id < 0) {
+        gl_scene_set_highlighted_edges(scene, NULL, 0);
+        return;
+    }
+    unsigned int *hi = (unsigned int *)malloc(graph->edge_count * 2 * sizeof(unsigned int));
+    size_t count = 0;
+    for (size_t e = 0; e < graph->edge_count; e++) {
+        if (graph->edges[e].source == node_id || graph->edges[e].target == node_id) {
+            hi[count * 2 + 0] = (unsigned int)graph->edges[e].source;
+            hi[count * 2 + 1] = (unsigned int)graph->edges[e].target;
+            count++;
+        }
+    }
+    gl_scene_set_highlighted_edges(scene, hi, count);
+    free(hi);
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "usage: %s <graph.json>\n", argv[0]);
@@ -148,6 +171,7 @@ int main(int argc, char **argv) {
                                              (float)mx, (float)my, PICK_RADIUS_PX);
                 if (hit >= 0) {
                     selected = hit;
+                    rebuild_highlighted_edges(&scene, &graph, selected);
                     interact = INTERACT_DRAG;
                     Vec3 forward, right, up;
                     camera_basis(&camera, &forward, &right, &up);
