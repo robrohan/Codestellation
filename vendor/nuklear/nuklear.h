@@ -28272,6 +28272,13 @@ nk_do_edit(nk_flags *state, struct nk_command_buffer *out,
     area.h = bounds.h - (2.0f * style->padding.y + 2 * style->border);
     if (flags & NK_EDIT_MULTILINE)
         area.w = NK_MAX(0, area.w - style->scrollbar_size.x);
+    /* CODESTELLATION PATCH: reserve room for a horizontal scrollbar too
+     * (mirrors the vertical reservation above) -- see the matching
+     * nk_do_scrollbarh call further down, added because unwrapped
+     * multiline text has no other way to reach content past the right
+     * edge besides arrow-key cursor movement. */
+    if (flags & NK_EDIT_MULTILINE && !(flags & NK_EDIT_NO_HORIZONTAL_SCROLL))
+        area.h = NK_MAX(0, area.h - style->scrollbar_size.y);
     row_height = (flags & NK_EDIT_MULTILINE)? font->height + style->row_padding: area.h;
 
     /* calculate clipping rectangle */
@@ -28606,6 +28613,30 @@ nk_do_edit(nk_flags *state, struct nk_command_buffer *out,
                 if (is_hovered && in->mouse.scroll_delta.y) {
                     in->mouse.scroll_delta.y = 0;
                 }
+
+                /* CODESTELLATION PATCH: horizontal counterpart of the
+                 * vertical scrollbar above -- unwrapped long lines were
+                 * otherwise only reachable via arrow-key cursor movement.
+                 * area.h was already shrunk by scrollbar_size.y for this
+                 * up top, mirroring how area.w is shrunk for the vertical
+                 * one. nk_do_scrollbarh already handles wheel (via
+                 * scroll_delta.x), click-drag, and click-to-page. */
+                if (!(flags & NK_EDIT_NO_HORIZONTAL_SCROLL)) {
+                    struct nk_rect hscroll = area;
+                    hscroll.y = (bounds.y + bounds.h - style->border) - style->scrollbar_size.y;
+                    hscroll.h = style->scrollbar_size.y;
+
+                    scroll_offset = edit->scrollbar.x;
+                    scroll_step = hscroll.w * 0.10f;
+                    scroll_inc = hscroll.w * 0.01f;
+                    scroll_target = text_size.x;
+                    edit->scrollbar.x = nk_do_scrollbarh(&ws, out, hscroll, is_hovered,
+                            scroll_offset, scroll_target, scroll_step, scroll_inc,
+                            &style->scrollbar, in, font);
+                    if (is_hovered && in->mouse.scroll_delta.x) {
+                        in->mouse.scroll_delta.x = 0;
+                    }
+                }
             }
         }
 
@@ -28900,7 +28931,19 @@ nk_edit_buffer(struct nk_context *ctx, nk_flags flags,
 
     filter = (!filter) ? nk_filter_default: filter;
     prev_state = (unsigned char)edit->active;
-    in = (flags & NK_EDIT_READ_ONLY) ? 0: in;
+    /* CODESTELLATION PATCH: upstream unconditionally nulled `in` here for
+     * NK_EDIT_READ_ONLY, which made a read-only edit box fully
+     * non-interactive -- no click-to-position, no drag-select, no
+     * scrollbar, no keyboard navigation, no copy. nk_do_edit() below
+     * already handles NK_EDIT_READ_ONLY correctly on its own: it forces
+     * edit->mode = NK_TEXT_EDIT_MODE_VIEW, which nk_textedit_text (typed
+     * chars, tab), NK_KEY_BACKSPACE/NK_KEY_DEL, nk_textedit_cut, and
+     * nk_textedit_paste all check and no-op on. So keeping `in` live here
+     * still fully blocks mutation while restoring everything else -- a
+     * real read-only, scrollable, selectable text viewer. If nuklear.h
+     * is ever re-vendored from upstream, re-apply this (drop this
+     * comment block and the line below it, i.e. delete the `in = (flags
+     * & NK_EDIT_READ_ONLY) ? 0 : in;` reintroduced by the fresh copy). */
     ret_flags = nk_do_edit(&ctx->last_widget_state, &win->buffer, bounds, flags,
                     filter, edit, &style->edit, in, style->font);
 

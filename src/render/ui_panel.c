@@ -53,8 +53,15 @@ void ui_panel_draw(struct nk_context *ctx, int window_width, int window_height,
     load_file_if_needed(selected_path);
 
     float w = (float)UI_PANEL_WIDTH;
+    /* NK_WINDOW_NO_SCROLLBAR: the layout below sizes its rows to exactly
+     * fill the window (language + path labels, then an edit box sized to
+     * the remainder), but nuklear's own item spacing/padding pushes the
+     * laid-out content a few pixels past the window's rect, which was
+     * enough to trigger this window's own scrollbar alongside the edit
+     * box's internal one -- redundant since the edit box already scrolls
+     * its own content. */
     if (nk_begin(ctx, "Inspector", nk_rect((float)window_width - w, 0, w, (float)window_height),
-                 NK_WINDOW_BORDER | NK_WINDOW_TITLE)) {
+                 NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_NO_SCROLLBAR)) {
         if (selected_path) {
             nk_layout_row_dynamic(ctx, 20, 1);
             nk_label(ctx, selected_language ? selected_language : "", NK_TEXT_LEFT);

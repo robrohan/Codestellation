@@ -26,8 +26,18 @@ void labels_draw(struct nk_context *ctx, int window_width, int window_height, in
                               nk_style_item_color(nk_rgba(0, 0, 0, 0)));
     nk_style_push_vec2(ctx, &ctx->style.window.padding, nk_vec2(0, 0));
 
+    /* NK_WINDOW_BACKGROUND matters here beyond just draw order: without
+     * it, this full-screen window (created every frame, after the
+     * Inspector) claims ctx->end (nuklear's "topmost/focused" window)
+     * and never releases it -- being NK_WINDOW_NO_INPUT, it's skipped
+     * from the focus-stealing logic that would otherwise let Inspector
+     * reclaim the top slot on click. Any window that isn't ctx->end gets
+     * flagged NK_WINDOW_ROM, which is what silently killed all input
+     * (scroll, click-to-position, drag-select) to the Inspector's text
+     * box. NK_WINDOW_BACKGROUND exempts this window from that fight
+     * entirely and draws it behind other windows instead of in front. */
     if (nk_begin(ctx, "##labels", nk_rect(0, 0, (float)window_width, (float)window_height),
-                 NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_NO_INPUT)) {
+                 NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_NO_INPUT | NK_WINDOW_BACKGROUND)) {
         struct nk_command_buffer *canvas = nk_window_get_canvas(ctx);
         const struct nk_user_font *font = ctx->style.font;
 

@@ -8,7 +8,7 @@
  * opaque. */
 struct nk_context;
 
-#define UI_PANEL_WIDTH 340
+#define UI_PANEL_WIDTH 420
 
 /* Renders the fixed-width right-hand inspector: selected node's path and
  * language (if any) plus a read-only scrollable view of that file's
