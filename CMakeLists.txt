@@ -48,6 +48,21 @@ if(EXISTS ${ts_csharp_SOURCE_DIR}/src/scanner.c)
 endif()
 target_include_directories(tree_sitter_csharp PUBLIC ${ts_csharp_SOURCE_DIR}/src)
 
+# --- tree-sitter-commonlisp grammar (Phase 6, Lisp adapter) --------------
+# WIP grammar with no CL-specific node types (see lisp_adapter.c) -- the
+# best available stand-in until the actual Lisp dialect is confirmed.
+FetchContent_Declare(ts_lisp
+    GIT_REPOSITORY https://github.com/tree-sitter-grammars/tree-sitter-commonlisp
+    GIT_TAG v0.4.1
+    GIT_SHALLOW TRUE
+)
+FetchContent_Populate(ts_lisp)
+add_library(tree_sitter_lisp STATIC ${ts_lisp_SOURCE_DIR}/src/parser.c)
+if(EXISTS ${ts_lisp_SOURCE_DIR}/src/scanner.c)
+    target_sources(tree_sitter_lisp PRIVATE ${ts_lisp_SOURCE_DIR}/src/scanner.c)
+endif()
+target_include_directories(tree_sitter_lisp PUBLIC ${ts_lisp_SOURCE_DIR}/src)
+
 # --- GLFW (window/input/GL context, cross-platform) ----------------------
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)

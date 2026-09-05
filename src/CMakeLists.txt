@@ -10,13 +10,14 @@ add_executable(codemap-build
     lang/registry.c
     lang/c/c_adapter.c
     lang/csharp/csharp_adapter.c
+    lang/lisp/lisp_adapter.c
 )
 
 target_include_directories(codemap-build PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/vendor/json
 )
-target_link_libraries(codemap-build PRIVATE tree-sitter tree_sitter_c tree_sitter_csharp)
+target_link_libraries(codemap-build PRIVATE tree-sitter tree_sitter_c tree_sitter_csharp tree_sitter_lisp)
 
 add_executable(codemap-view
     common/pathutil.c
