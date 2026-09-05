@@ -49,3 +49,27 @@ if(NOT APPLE)
     target_link_libraries(codemap-view PRIVATE glad)
     target_include_directories(codemap-view PRIVATE ${CMAKE_SOURCE_DIR}/vendor/glad/include)
 endif()
+
+# Distributable macOS build: `cmake -S . -B build-xcode -G Xcode` turns
+# codemap-view into a real, Developer-ID-signed .app you can hand to another
+# Mac (and signs codemap-build too, as a plain binary -- it has no window to
+# bundle). Gated on the Xcode generator specifically so the everyday
+# `cmake -S . -B build` (Unix Makefiles/Ninja) dev build keeps producing a
+# bare, ad-hoc-signed executable exactly as it always has.
+if(APPLE AND CMAKE_GENERATOR STREQUAL "Xcode")
+    set_target_properties(codemap-view PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "Codestellation"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.robrohan.codestellation.codemap-view"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1"
+        MACOSX_BUNDLE_BUNDLE_VERSION "0.1"
+    )
+    foreach(_codemap_target codemap-view codemap-build)
+        set_target_properties(${_codemap_target} PROPERTIES
+            XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Manual"
+            XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Developer ID Application"
+            XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "96MW2MVPWL"
+            XCODE_ATTRIBUTE_ENABLE_HARDENED_RUNTIME "YES"
+        )
+    endforeach()
+endif()
