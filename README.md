@@ -1,13 +1,24 @@
 # codemap3d
 
-Walks a legacy codebase, extracts cross-file dependencies with tree-sitter,
-and (eventually) renders them as an interactive 3D graph in native
-OpenGL + Nuklear. See `/Users/robrohan/.claude/plans/splendid-skipping-cray.md`
-for the full design.
+Walks a codebase, extracts cross-file dependencies with tree-sitter, and
+renders them as an interactive 3D graph in native OpenGL + Nuklear.
+Built for digging through unfamiliar/legacy multi-language codebases.
+See `/Users/robrohan/.claude/plans/splendid-skipping-cray.md` for the
+full design and phase history.
 
-Phase 1 (current): `codemap-build`, a headless CLI that walks a directory,
-parses every file with the matching language adapter, and writes a
-dependency graph to `graph.json`. No GL/window code yet.
+Two binaries:
+- `codemap-build` -- headless CLI. Walks a directory (recursively, mixed
+  languages in one tree are fine), parses each file with the matching
+  language adapter, and writes a dependency graph to `graph.json`.
+- `codemap-view` -- loads a `graph.json`, lays it out in 3D once at
+  startup, and opens a window to explore it.
+
+Currently supported languages: **C** (`.c`/`.h`, `#include`-based),
+**C#** (`.cs`, namespace/type declarations + `using`-qualified
+references), **Lisp** (`.lisp`/`.lsp`/`.cl` -- a Common Lisp stand-in;
+see the header comment in `src/lang/lisp/lisp_adapter.c` before trusting
+it on a real codebase, the actual dialect wasn't confirmed when this was
+written).
 
 ## Build
 
@@ -16,11 +27,28 @@ cmake -S . -B build
 cmake --build build
 ```
 
+Fetches tree-sitter + per-language grammars and GLFW via CMake
+FetchContent on first configure (the C# grammar's generated parser is
+large, so that step takes a bit). Verified on macOS; Windows/Linux
+should work (a GL loader and the directory-walk code both have
+non-Apple branches) but hasn't been run on real hardware in this
+environment -- see the Phase 7 commit message for specifics.
+
 ## Run
 
 ```
-./build/src/codemap-build --root test/fixtures/c --out graph.json
-python3 scripts/sanity_check.py graph.json   # optional, needs networkx
+./build/src/codemap-build --root <your-codebase-dir> --out graph.json
+./build/src/codemap-view graph.json
+```
+
+In the viewer: left-drag empty space to orbit, scroll to zoom, click a
+node to inspect its file in the right-hand panel, drag a node to
+reposition it (it stays put -- layout is computed once at load, not a
+continuous simulation). Esc to quit.
+
+Optional sanity check of the graph output itself (needs networkx):
+```
+python3 scripts/sanity_check.py graph.json
 ```
 
 ## graph.json schema
@@ -41,10 +69,14 @@ Load in Python: `nx.node_link_graph(json.load(f), edges="links")`
 
 ## Adding a language
 
-Every language plugs into `src/lang/adapter.h`'s `LanguageAdapter` struct —
-the pipeline (`src/pipeline/*.c`) never references a specific language by
-name. See `src/lang/c/c_adapter.c` for the simplest possible adapter
-(path-based deps, no symbol table) and the plan doc for the C# adapter
-(namespace/type declarations + `using`-qualified references) and the
-Lisp adapter (package/require-based, grammar currently a Common-Lisp
-stand-in pending confirmation of the actual dialect in use).
+Every language plugs into `src/lang/adapter.h`'s `LanguageAdapter`
+struct -- the pipeline (`src/pipeline/*.c`) never references a specific
+language by name, only through that interface. To add one: pick a
+tree-sitter grammar, fetch it in the top-level `CMakeLists.txt`
+(mirroring the existing `ts_c`/`ts_csharp`/`ts_lisp` blocks), and write
+an adapter implementing `extract_declarations`/`extract_references`/
+`resolve_reference`. `src/lang/c/c_adapter.c` is the simplest example
+(no symbol table, path-based deps); `src/lang/csharp/csharp_adapter.c`
+shows scoped namespace/type resolution by walking the parse tree
+directly rather than a flat query; `src/lang/lisp/lisp_adapter.c` shows
+adapting to a grammar with no dialect-specific node types at all.
