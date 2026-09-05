@@ -1,6 +1,9 @@
 #ifndef CODEMAP_UI_PANEL_H
 #define CODEMAP_UI_PANEL_H
 
+#include <stddef.h>
+#include "../notes/notes.h"
+
 /* Forward-declared rather than including nuklear.h here: Nuklear's
  * NK_INCLUDE_* feature macros affect struct layout, so every TU that
  * sees the real definition must define the same set consistently --
@@ -10,11 +13,24 @@ struct nk_context;
 
 #define UI_PANEL_WIDTH 420
 
-/* Renders the fixed-width right-hand inspector: selected node's path and
- * language (if any) plus a read-only scrollable view of that file's
- * actual text, re-read from disk whenever the selection changes. */
+/* Renders the fixed-width right-hand inspector.
+ *
+ * Single-selection mode (cluster_count <= 1): selected node's path and
+ * language (if any), a read-only scrollable view of that file's actual
+ * text, and a Notes section listing/adding/editing/deleting file+line or
+ * whole-file notes for it.
+ *
+ * Group mode (cluster_count > 1): cluster_paths/cluster_count instead
+ * describe a multi-file selection; the panel shows that path list and a
+ * Notes section for group notes covering exactly that set of files.
+ * selected_path/selected_language are ignored in this mode.
+ *
+ * notes is reloaded in place (see notes.h) by any add/edit/delete the
+ * user performs here; notes_md_path is where those saves go. */
 void ui_panel_draw(struct nk_context *ctx, int window_width, int window_height,
-                    const char *selected_path, const char *selected_language);
+                    const char *selected_path, const char *selected_language,
+                    const char **cluster_paths, size_t cluster_count,
+                    NoteSet *notes, const char *notes_md_path);
 
 void ui_panel_shutdown(void);
 

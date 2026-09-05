@@ -21,7 +21,7 @@ static const char *basename_of(const char *path) {
 }
 
 void labels_draw(struct nk_context *ctx, int window_width, int window_height, int panel_x,
-                  const float *view_proj, const Vec3 *positions, const Graph *g) {
+                  const float *view_proj, const Vec3 *positions, const Graph *g, const NoteSet *notes) {
     nk_style_push_style_item(ctx, &ctx->style.window.fixed_background,
                               nk_style_item_color(nk_rgba(0, 0, 0, 0)));
     nk_style_push_vec2(ctx, &ctx->style.window.padding, nk_vec2(0, 0));
@@ -52,6 +52,12 @@ void labels_draw(struct nk_context *ctx, int window_width, int window_height, in
 
             struct nk_rect r = nk_rect(sx - text_w * 0.5f, sy - 20.0f, text_w + 4.0f, 16.0f);
             nk_draw_text(canvas, r, name, len, font, nk_rgba(0, 0, 0, 0), nk_rgb(225, 225, 225));
+
+            const Note *found[1];
+            if (notes && notes_find_for_path(notes, g->nodes[i].path, found, 1) > 0) {
+                float dot_x = sx + text_w * 0.5f + 6.0f;
+                nk_fill_circle(canvas, nk_rect(dot_x - 3.0f, sy - 20.0f + 2.0f, 6.0f, 6.0f), nk_rgb(230, 165, 40));
+            }
         }
     }
     nk_end(ctx);
