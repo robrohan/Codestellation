@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Loads a codemap3d graph.json via networkx as a quick sanity check.
-Not part of the tool itself -- codemap3d's core pipeline is C; this is
+"""Loads a Codestellation graph.json via networkx as a quick sanity check.
+Not part of the tool itself -- Codestellation's core pipeline is C; this is
 just a convenience for offline analysis of its output.
 """
 import json

@@ -57,17 +57,21 @@ All of this is built, working, and verified on macOS:
   repo.) If not, that's likely priority one.
 - Pushed to `git@github.com:robrohan/Codestellation.git`.
 
-## Naming is half-done — flag this, don't just silently fix it
+## Naming — mostly done
 
 The **repo/folder** is named `Codestellation` (chosen for the "code +
 constellation" pun, and because it's meant to grow from a single-codebase
-star map into a multi-service "galaxy" view later). The **internals still say
-`codemap3d`**: the CMake project name, both binary names (`codemap-build`,
-`codemap-view`), the GLFW window title, and the README all predate the
-rename. Ask the user whether they want a real rename pass (binaries, window
-title, `project()` name, README) or whether "Codestellation" is just the
-repo-level brand and the tool keeps calling itself codemap3d internally —
-don't assume either way.
+star map into a multi-service "galaxy" view later). The `codemap3d` name has
+been scrubbed from everywhere it appeared as a literal string: the CMake
+`project()` name, the GLFW window title, the Nuklear idle-panel label, and
+`scripts/sanity_check.py`'s docstring all say `Codestellation` now.
+
+The two **binary names** (`codemap-build`, `codemap-view`) were deliberately
+left alone — the user asked specifically to update "codemap3d" bits, not to
+rename the executables. If a fuller rename ever comes up (binaries, README
+command examples, CI workflow references to `codemap-build.exe` /
+`codemap-view.exe`), treat it as a separate, larger decision — don't assume
+it's wanted just because the string-level rename happened.
 
 ## What the user said they want to do next, in order
 

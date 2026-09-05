@@ -94,7 +94,7 @@ int main(int argc, char **argv) {
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 
-    GLFWwindow *win = glfwCreateWindow(1280, 800, "codemap3d", NULL, NULL);
+    GLFWwindow *win = glfwCreateWindow(1280, 800, "Codestellation", NULL, NULL);
     if (!win) {
         fprintf(stderr, "error: glfwCreateWindow failed\n");
         glfwTerminate();
