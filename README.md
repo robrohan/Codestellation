@@ -1,4 +1,6 @@
-# codemap3d
+# Codestellation
+
+![screen shot](./doc/screen.png)
 
 Walks a codebase, extracts cross-file dependencies with tree-sitter, and
 renders them as an interactive 3D graph in native OpenGL + Nuklear.
