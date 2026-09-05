@@ -162,7 +162,7 @@ int main(int argc, char **argv) {
 
         float view[16], proj[16], view_proj[16];
         camera_view_matrix(&camera, view);
-        mat4_perspective(proj, camera.fovy, aspect, 0.05f, 1000.0f);
+        mat4_perspective(proj, camera.fovy, aspect, 0.002f, 1000.0f);
         mat4_multiply(view_proj, proj, view);
 
         double mx, my;
@@ -242,7 +242,13 @@ int main(int argc, char **argv) {
 
         float scroll_y = ctx->input.mouse.scroll_delta.y;
         if (scroll_y != 0.0f && !over_panel) {
-            camera_zoom(&camera, scroll_y * (camera.distance * 0.1f));
+            /* Proportional-to-distance step feels natural zoomed out, but
+             * decays asymptotically and stalls well short of the actual
+             * floor once close in -- a minimum absolute step keeps every
+             * scroll tick doing something perceptible. */
+            float step = camera.distance * 0.1f;
+            if (step < 0.01f) step = 0.01f;
+            camera_zoom(&camera, scroll_y * step);
         }
 
         {
