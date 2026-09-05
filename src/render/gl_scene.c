@@ -67,6 +67,11 @@ void gl_scene_init(GLScene *scene) {
     glBindBuffer(GL_ARRAY_BUFFER, scene->vbo);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
     glEnableVertexAttribArray(0);
+    /* The element-buffer binding is part of VAO state (unlike GL_ARRAY_BUFFER),
+     * so it has to be bound here, while this VAO is current -- binding it later
+     * in gl_scene_upload (with no VAO bound) would attach it to VAO 0 instead,
+     * leaving this VAO with no index buffer and silently drawing zero lines. */
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, scene->ebo);
     glBindVertexArray(0);
 
     scene->edge_index_count = 0;
