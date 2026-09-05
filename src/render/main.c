@@ -134,9 +134,18 @@ int main(int argc, char **argv) {
     }
 
     int selected = -1;
+    int drag_node = -1;
     InteractMode interact = INTERACT_NONE;
     double last_mouse_x = 0, last_mouse_y = 0;
     Vec3 drag_plane_normal = { 0, 0, 1 };
+
+    /* Right-click doubles as both "pan" (drag) and "select" (click with
+     * no real movement) -- these track which button started the current
+     * pan and whether it has moved enough to count as a drag rather
+     * than a click. */
+    bool pan_via_right = false;
+    double press_x = 0, press_y = 0;
+    bool moved_since_press = false;
 
     glEnable(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_DEPTH_TEST);
@@ -166,12 +175,13 @@ int main(int argc, char **argv) {
         bool pan_button_down = (middle_state == GLFW_PRESS || right_state == GLFW_PRESS);
 
         if (interact == INTERACT_NONE) {
+            /* Left button: always reposition-drag on a node, or orbit on
+             * empty space -- never touches selection. */
             if (left_state == GLFW_PRESS && !over_panel) {
                 int hit = pick_nearest_node(view_proj, positions, graph.node_count, width, height,
                                              (float)mx, (float)my, PICK_RADIUS_PX);
                 if (hit >= 0) {
-                    selected = hit;
-                    rebuild_highlighted_edges(&scene, &graph, selected);
+                    drag_node = hit;
                     interact = INTERACT_DRAG;
                     Vec3 forward, right, up;
                     camera_basis(&camera, &forward, &right, &up);
@@ -183,13 +193,26 @@ int main(int argc, char **argv) {
                 last_mouse_y = my;
             } else if (pan_button_down && !over_panel) {
                 interact = INTERACT_PAN;
+                pan_via_right = (right_state == GLFW_PRESS);
+                press_x = mx;
+                press_y = my;
+                moved_since_press = false;
                 last_mouse_x = mx;
                 last_mouse_y = my;
             }
         } else {
             bool should_end = (interact == INTERACT_PAN) ? !pan_button_down : (left_state == GLFW_RELEASE);
             if (should_end) {
+                /* A right-click that never moved past the threshold is a
+                 * select/deselect click, not a pan -- act on it now,
+                 * at release, using the current cursor position. */
+                if (interact == INTERACT_PAN && pan_via_right && !moved_since_press) {
+                    selected = pick_nearest_node(view_proj, positions, graph.node_count, width, height,
+                                                  (float)mx, (float)my, PICK_RADIUS_PX);
+                    rebuild_highlighted_edges(&scene, &graph, selected);
+                }
                 interact = INTERACT_NONE;
+                drag_node = -1;
             } else {
                 double dx = mx - last_mouse_x;
                 double dy = my - last_mouse_y;
@@ -197,15 +220,16 @@ int main(int argc, char **argv) {
                 if (interact == INTERACT_ORBIT) {
                     camera_orbit(&camera, (float)dx * -0.005f, (float)dy * -0.005f);
                 } else if (interact == INTERACT_PAN) {
+                    if (fabs(mx - press_x) > 4.0 || fabs(my - press_y) > 4.0) moved_since_press = true;
                     camera_pan(&camera, (float)dx, (float)dy);
-                } else if (interact == INTERACT_DRAG && selected >= 0) {
+                } else if (interact == INTERACT_DRAG && drag_node >= 0) {
                     float ndc_x = (2.0f * (float)mx / (float)width) - 1.0f;
                     float ndc_y = 1.0f - (2.0f * (float)my / (float)height);
                     Vec3 ray_origin, ray_dir;
                     camera_ray(&camera, ndc_x, ndc_y, aspect, &ray_origin, &ray_dir);
                     Vec3 new_pos;
-                    if (ray_plane_intersect(ray_origin, ray_dir, positions[selected], drag_plane_normal, &new_pos)) {
-                        positions[selected] = new_pos;
+                    if (ray_plane_intersect(ray_origin, ray_dir, positions[drag_node], drag_plane_normal, &new_pos)) {
+                        positions[drag_node] = new_pos;
                         gl_scene_update_positions(&scene, (const float *)positions, graph.node_count);
                     }
                 }

@@ -69,8 +69,8 @@ void ui_panel_draw(struct nk_context *ctx, int window_width, int window_height,
         } else {
             nk_layout_row_dynamic(ctx, 20, 1);
             nk_label(ctx, "codemap3d", NK_TEXT_LEFT);
-            nk_label(ctx, "Click a node to inspect its file here.", NK_TEXT_LEFT);
-            nk_label(ctx, "Drag a node to reposition it.", NK_TEXT_LEFT);
+            nk_label(ctx, "Right-click a node to select it.", NK_TEXT_LEFT);
+            nk_label(ctx, "Left-drag a node to reposition it.", NK_TEXT_LEFT);
         }
     }
     nk_end(ctx);
