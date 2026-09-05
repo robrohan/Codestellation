@@ -5,8 +5,6 @@
 Walks a codebase, extracts cross-file dependencies with tree-sitter, and
 renders them as an interactive 3D graph in native OpenGL + Nuklear.
 Built for digging through unfamiliar/legacy multi-language codebases.
-See `/Users/robrohan/.claude/plans/splendid-skipping-cray.md` for the
-full design and phase history.
 
 Two binaries:
 - `codemap-build` -- headless CLI. Walks a directory (recursively, mixed
