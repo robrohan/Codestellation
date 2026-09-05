@@ -170,7 +170,9 @@ int main(int argc, char **argv) {
             ui_panel_draw(ctx, width, height, sel_path, sel_lang);
         }
 
-        glViewport(0, 0, width, height);
+        int fb_width, fb_height;
+        glfwGetFramebufferSize(win, &fb_width, &fb_height);
+        glViewport(0, 0, fb_width, fb_height);
         glClearColor(0.09f, 0.09f, 0.11f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
