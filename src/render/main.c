@@ -24,6 +24,7 @@
 #include "gl_scene.h"
 #include "picking.h"
 #include "ui_panel.h"
+#include "labels.h"
 #include "../graph/graph.h"
 #include "../graph/graph_json.h"
 
@@ -33,8 +34,9 @@
 #define MAX_VERTEX_BUFFER (512 * 1024)
 #define MAX_ELEMENT_BUFFER (128 * 1024)
 #define PICK_RADIUS_PX 10.0f
+#define AXIS_LENGTH 4.0f
 
-typedef enum { INTERACT_NONE, INTERACT_ORBIT, INTERACT_DRAG } InteractMode;
+typedef enum { INTERACT_NONE, INTERACT_ORBIT, INTERACT_DRAG, INTERACT_PAN } InteractMode;
 
 int main(int argc, char **argv) {
     if (argc < 2) {
@@ -123,51 +125,73 @@ int main(int argc, char **argv) {
 
         double mx, my;
         glfwGetCursorPos(win, &mx, &my);
-        bool over_panel = mx >= (double)(width - UI_PANEL_WIDTH);
+        int panel_x = width - UI_PANEL_WIDTH;
+        bool over_panel = mx >= (double)panel_x;
         int left_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT);
+        int middle_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_MIDDLE);
+        int right_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT);
+        bool pan_button_down = (middle_state == GLFW_PRESS || right_state == GLFW_PRESS);
 
-        if (left_state == GLFW_PRESS && interact == INTERACT_NONE && !over_panel) {
-            int hit = pick_nearest_node(view_proj, positions, graph.node_count, width, height,
-                                         (float)mx, (float)my, PICK_RADIUS_PX);
-            if (hit >= 0) {
-                selected = hit;
-                interact = INTERACT_DRAG;
-                Vec3 forward, right, up;
-                camera_basis(&camera, &forward, &right, &up);
-                drag_plane_normal = forward;
-            } else {
-                interact = INTERACT_ORBIT;
-            }
-            last_mouse_x = mx;
-            last_mouse_y = my;
-        } else if (left_state == GLFW_RELEASE) {
-            interact = INTERACT_NONE;
-        } else if (interact != INTERACT_NONE) {
-            double dx = mx - last_mouse_x;
-            double dy = my - last_mouse_y;
-
-            if (interact == INTERACT_ORBIT) {
-                camera_orbit(&camera, (float)dx * -0.005f, (float)dy * -0.005f);
-            } else if (interact == INTERACT_DRAG && selected >= 0) {
-                float ndc_x = (2.0f * (float)mx / (float)width) - 1.0f;
-                float ndc_y = 1.0f - (2.0f * (float)my / (float)height);
-                Vec3 ray_origin, ray_dir;
-                camera_ray(&camera, ndc_x, ndc_y, aspect, &ray_origin, &ray_dir);
-                Vec3 new_pos;
-                if (ray_plane_intersect(ray_origin, ray_dir, positions[selected], drag_plane_normal, &new_pos)) {
-                    positions[selected] = new_pos;
-                    gl_scene_update_positions(&scene, (const float *)positions, graph.node_count);
+        if (interact == INTERACT_NONE) {
+            if (left_state == GLFW_PRESS && !over_panel) {
+                int hit = pick_nearest_node(view_proj, positions, graph.node_count, width, height,
+                                             (float)mx, (float)my, PICK_RADIUS_PX);
+                if (hit >= 0) {
+                    selected = hit;
+                    interact = INTERACT_DRAG;
+                    Vec3 forward, right, up;
+                    camera_basis(&camera, &forward, &right, &up);
+                    drag_plane_normal = forward;
+                } else {
+                    interact = INTERACT_ORBIT;
                 }
+                last_mouse_x = mx;
+                last_mouse_y = my;
+            } else if (pan_button_down && !over_panel) {
+                interact = INTERACT_PAN;
+                last_mouse_x = mx;
+                last_mouse_y = my;
             }
-            last_mouse_x = mx;
-            last_mouse_y = my;
+        } else {
+            bool should_end = (interact == INTERACT_PAN) ? !pan_button_down : (left_state == GLFW_RELEASE);
+            if (should_end) {
+                interact = INTERACT_NONE;
+            } else {
+                double dx = mx - last_mouse_x;
+                double dy = my - last_mouse_y;
+
+                if (interact == INTERACT_ORBIT) {
+                    camera_orbit(&camera, (float)dx * -0.005f, (float)dy * -0.005f);
+                } else if (interact == INTERACT_PAN) {
+                    camera_pan(&camera, (float)dx, (float)dy);
+                } else if (interact == INTERACT_DRAG && selected >= 0) {
+                    float ndc_x = (2.0f * (float)mx / (float)width) - 1.0f;
+                    float ndc_y = 1.0f - (2.0f * (float)my / (float)height);
+                    Vec3 ray_origin, ray_dir;
+                    camera_ray(&camera, ndc_x, ndc_y, aspect, &ray_origin, &ray_dir);
+                    Vec3 new_pos;
+                    if (ray_plane_intersect(ray_origin, ray_dir, positions[selected], drag_plane_normal, &new_pos)) {
+                        positions[selected] = new_pos;
+                        gl_scene_update_positions(&scene, (const float *)positions, graph.node_count);
+                    }
+                }
+                last_mouse_x = mx;
+                last_mouse_y = my;
+            }
         }
 
         nk_glfw3_new_frame(&glfw_nk);
+
+        float scroll_y = ctx->input.mouse.scroll_delta.y;
+        if (scroll_y != 0.0f && !over_panel) {
+            camera_zoom(&camera, scroll_y * (camera.distance * 0.1f));
+        }
+
         {
             const char *sel_path = selected >= 0 ? graph.nodes[selected].path : NULL;
             const char *sel_lang = selected >= 0 ? graph.nodes[selected].language : NULL;
             ui_panel_draw(ctx, width, height, sel_path, sel_lang);
+            labels_draw(ctx, width, height, panel_x, view_proj, positions, &graph);
         }
 
         int fb_width, fb_height;
@@ -177,6 +201,7 @@ int main(int argc, char **argv) {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         gl_scene_draw(&scene, view_proj, selected);
+        gl_scene_draw_axis(&scene, view_proj, AXIS_LENGTH);
 
         nk_glfw3_render(&glfw_nk, NK_ANTI_ALIASING_ON, MAX_VERTEX_BUFFER, MAX_ELEMENT_BUFFER);
         glfwSwapBuffers(win);

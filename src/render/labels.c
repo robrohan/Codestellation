@@ -1,0 +1,51 @@
+#define NK_INCLUDE_FIXED_TYPES
+#define NK_INCLUDE_STANDARD_IO
+#define NK_INCLUDE_STANDARD_VARARGS
+#define NK_INCLUDE_DEFAULT_ALLOCATOR
+#define NK_INCLUDE_VERTEX_BUFFER_OUTPUT
+#define NK_INCLUDE_FONT_BAKING
+#define NK_INCLUDE_DEFAULT_FONT
+#include "nuklear.h"
+
+#include "labels.h"
+#include "picking.h"
+#include <string.h>
+
+static const char *basename_of(const char *path) {
+    const char *slash = strrchr(path, '/');
+    const char *bslash = strrchr(path, '\\');
+    const char *base = path;
+    if (slash && (!bslash || slash > bslash)) base = slash + 1;
+    else if (bslash) base = bslash + 1;
+    return base;
+}
+
+void labels_draw(struct nk_context *ctx, int window_width, int window_height, int panel_x,
+                  const float *view_proj, const Vec3 *positions, const Graph *g) {
+    nk_style_push_style_item(ctx, &ctx->style.window.fixed_background,
+                              nk_style_item_color(nk_rgba(0, 0, 0, 0)));
+    nk_style_push_vec2(ctx, &ctx->style.window.padding, nk_vec2(0, 0));
+
+    if (nk_begin(ctx, "##labels", nk_rect(0, 0, (float)window_width, (float)window_height),
+                 NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_NO_INPUT)) {
+        struct nk_command_buffer *canvas = nk_window_get_canvas(ctx);
+        const struct nk_user_font *font = ctx->style.font;
+
+        for (size_t i = 0; i < g->node_count; i++) {
+            float sx, sy;
+            if (!project_to_screen(view_proj, positions[i], window_width, window_height, &sx, &sy)) continue;
+            if (sx >= (float)panel_x || sx < 0 || sy < 0 || sy > (float)window_height) continue;
+
+            const char *name = basename_of(g->nodes[i].path);
+            int len = (int)strlen(name);
+            float text_w = font ? font->width(font->userdata, font->height, name, len) : (float)(len * 6);
+
+            struct nk_rect r = nk_rect(sx - text_w * 0.5f, sy - 20.0f, text_w + 4.0f, 16.0f);
+            nk_draw_text(canvas, r, name, len, font, nk_rgba(0, 0, 0, 0), nk_rgb(225, 225, 225));
+        }
+    }
+    nk_end(ctx);
+
+    nk_style_pop_vec2(ctx);
+    nk_style_pop_style_item(ctx);
+}

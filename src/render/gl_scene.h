@@ -10,6 +10,7 @@ typedef struct {
     GLint u_mvp, u_color;
     GLsizei edge_index_count;
     GLsizei point_count;
+    GLuint axis_vao, axis_vbo;
 } GLScene;
 
 void gl_scene_init(GLScene *scene);
@@ -27,6 +28,11 @@ void gl_scene_update_positions(GLScene *scene, const float *positions, size_t po
 /* mvp: 16 floats, column-major. highlight_index: node to draw in the
  * highlight color, or -1 for none. */
 void gl_scene_draw(const GLScene *scene, const float *mvp, int highlight_index);
+
+/* Small RGB axis gizmo at the world origin (X=red, Y=green, Z=blue),
+ * length in world units -- just an orientation anchor while flying
+ * around the graph. */
+void gl_scene_draw_axis(const GLScene *scene, const float *mvp, float length);
 
 void gl_scene_destroy(GLScene *scene);
 

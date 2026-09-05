@@ -76,6 +76,17 @@ void gl_scene_init(GLScene *scene) {
 
     scene->edge_index_count = 0;
     scene->point_count = 0;
+
+    /* Axis gizmo: 3 segments (origin -> X/Y/Z). Re-uploaded (6 floats*3,
+     * trivially cheap) each gl_scene_draw_axis call rather than cached,
+     * since `length` is caller-supplied and rarely if ever changes. */
+    glGenVertexArrays(1, &scene->axis_vao);
+    glGenBuffers(1, &scene->axis_vbo);
+    glBindVertexArray(scene->axis_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, scene->axis_vbo);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
 }
 
 void gl_scene_upload(GLScene *scene, const float *positions, size_t point_count,
@@ -114,9 +125,34 @@ void gl_scene_draw(const GLScene *scene, const float *mvp, int highlight_index) 
     glBindVertexArray(0);
 }
 
+void gl_scene_draw_axis(const GLScene *scene, const float *mvp, float length) {
+    const float verts[18] = {
+        0, 0, 0,  length, 0, 0,   /* X */
+        0, 0, 0,  0, length, 0,   /* Y */
+        0, 0, 0,  0, 0, length,   /* Z */
+    };
+
+    glUseProgram(scene->prog);
+    glUniformMatrix4fv(scene->u_mvp, 1, GL_FALSE, mvp);
+    glBindVertexArray(scene->axis_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, scene->axis_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
+
+    glUniform4f(scene->u_color, 0.85f, 0.25f, 0.25f, 1.0f); /* X = red */
+    glDrawArrays(GL_LINES, 0, 2);
+    glUniform4f(scene->u_color, 0.25f, 0.85f, 0.25f, 1.0f); /* Y = green */
+    glDrawArrays(GL_LINES, 2, 2);
+    glUniform4f(scene->u_color, 0.25f, 0.45f, 0.95f, 1.0f); /* Z = blue */
+    glDrawArrays(GL_LINES, 4, 2);
+
+    glBindVertexArray(0);
+}
+
 void gl_scene_destroy(GLScene *scene) {
     glDeleteProgram(scene->prog);
     glDeleteBuffers(1, &scene->vbo);
     glDeleteBuffers(1, &scene->ebo);
     glDeleteVertexArrays(1, &scene->vao);
+    glDeleteBuffers(1, &scene->axis_vbo);
+    glDeleteVertexArrays(1, &scene->axis_vao);
 }

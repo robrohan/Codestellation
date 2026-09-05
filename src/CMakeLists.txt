@@ -29,6 +29,7 @@ add_executable(codemap-view
     render/gl_scene.c
     render/picking.c
     render/ui_panel.c
+    render/labels.c
 )
 target_include_directories(codemap-view PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}

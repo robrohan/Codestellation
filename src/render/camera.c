@@ -28,6 +28,14 @@ void camera_zoom(Camera *cam, float delta) {
     if (cam->distance > 500.0f) cam->distance = 500.0f;
 }
 
+void camera_pan(Camera *cam, float dx_screen, float dy_screen) {
+    Vec3 forward, right, up;
+    camera_basis(cam, &forward, &right, &up);
+    float scale = cam->distance * 0.0015f;
+    cam->target = vec3_sub(cam->target, vec3_scale(right, dx_screen * scale));
+    cam->target = vec3_add(cam->target, vec3_scale(up, dy_screen * scale));
+}
+
 Vec3 camera_eye(const Camera *cam) {
     float cp = cosf(cam->pitch);
     Vec3 offset = {

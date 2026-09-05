@@ -17,6 +17,9 @@ typedef struct {
 void camera_init(Camera *cam);
 void camera_orbit(Camera *cam, float dyaw, float dpitch);
 void camera_zoom(Camera *cam, float delta);
+/* Translates the orbit target across the view plane (screen-space right/up),
+ * scaled by distance so panning speed stays sensible at any zoom level. */
+void camera_pan(Camera *cam, float dx_screen, float dy_screen);
 Vec3 camera_eye(const Camera *cam);
 /* forward points from eye toward target. */
 void camera_basis(const Camera *cam, Vec3 *out_forward, Vec3 *out_right, Vec3 *out_up);
