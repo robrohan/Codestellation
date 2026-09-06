@@ -121,7 +121,7 @@ void note_compose_draw(struct nk_context *ctx, NoteSet *notes, const char *notes
     out_bounds->x = out_bounds->y = out_bounds->w = out_bounds->h = 0.0f;
     if (!g_open) return;
 
-    if (nk_begin(ctx, NOTE_COMPOSE_TITLE, nk_rect(60, 80, 380, 320),
+    if (nk_begin(ctx, NOTE_COMPOSE_TITLE, nk_rect(320, 140, 380, 320),
                  NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
                  NK_WINDOW_MINIMIZABLE)) {
         struct nk_vec2 size = nk_window_get_size(ctx);
