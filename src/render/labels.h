@@ -20,7 +20,7 @@ struct nk_context;
  * avoid". A node with at least one note (file or group) gets a small
  * amber dot next to its label. */
 void labels_draw(struct nk_context *ctx, int window_width, int window_height,
-                  PanelRect inspector_bounds, PanelRect note_bounds,
+                  PanelRect inspector_bounds, PanelRect note_bounds, PanelRect properties_bounds,
                   const float *view_proj, const Vec3 *positions, const Graph *g, const NoteSet *notes);
 
 #endif

@@ -35,13 +35,17 @@ add_executable(codemap-view
     render/picking.c
     render/ui_panel.c
     render/note_compose.c
+    render/properties_panel.c
+    render/project_launcher.c
     render/labels.c
+    ${CMAKE_SOURCE_DIR}/vendor/tinyfiledialogs/tinyfiledialogs.c
 )
 target_include_directories(codemap-view PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/render
     ${CMAKE_SOURCE_DIR}/vendor/nuklear
     ${CMAKE_SOURCE_DIR}/vendor/json
+    ${CMAKE_SOURCE_DIR}/vendor/tinyfiledialogs
 )
 target_link_libraries(codemap-view PRIVATE glfw OpenGL::GL)
 
@@ -78,4 +82,30 @@ if(APPLE AND CMAKE_GENERATOR STREQUAL "Xcode")
             XCODE_ATTRIBUTE_ENABLE_HARDENED_RUNTIME "YES"
         )
     endforeach()
+
+    # codemap-view's Properties pane can build+open an arbitrary directory
+    # at runtime (project_launcher.c), which shells out to a sibling
+    # `codemap-build` found next to its own executable -- true for the
+    # everyday dev build (both land in the same flat output directory),
+    # but NOT for this bundle: codemap-view's real executable lives at
+    # Contents/MacOS/codemap-view, disconnected from wherever
+    # codemap-build was built, once this .app is copied to another Mac.
+    # Embed a copy of codemap-build right next to it so the same "look
+    # next to me" runtime logic keeps working unmodified, then re-sign
+    # the whole bundle -- signing must happen *after* embedding or the
+    # bundle's own seal won't cover the copied-in binary.
+    # A literal "Developer ID Application" identity string is ambiguous on
+    # a keychain holding more than one certificate with that same display
+    # name (a stale/renewed duplicate, e.g.) -- codesign then refuses to
+    # guess. $EXPANDED_CODE_SIGN_IDENTITY is the specific identity Xcode
+    # itself already resolved CODE_SIGN_IDENTITY to for this very target
+    # (exported into every Run Script phase's environment), so reusing it
+    # here can't be ambiguous -- it's already a single resolved identity.
+    add_custom_command(TARGET codemap-view POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:codemap-build>
+            $<TARGET_FILE_DIR:codemap-view>/codemap-build
+        COMMAND /bin/sh -c "codesign --force --deep --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" '$<TARGET_BUNDLE_DIR:codemap-view>'"
+        COMMENT "Embedding codemap-build into codemap-view.app and re-sealing the bundle"
+    )
 endif()

@@ -26,18 +26,26 @@
 #include "picking.h"
 #include "ui_panel.h"
 #include "note_compose.h"
+#include "properties_panel.h"
+#include "project_launcher.h"
 #include "labels.h"
 #include "panel_rect.h"
+#include "../common/pathutil.h"
 #include "../graph/graph.h"
 #include "../graph/graph_json.h"
 #include "../notes/filehash.h"
 #include "../notes/overlay.h"
 #include "../notes/notes.h"
 
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdint.h>
 
 #define MAX_VERTEX_BUFFER (512 * 1024)
 #define MAX_ELEMENT_BUFFER (128 * 1024)
@@ -106,29 +114,66 @@ static char *derive_sibling_path(const char *graph_path, const char *suffix) {
     return out;
 }
 
-int main(int argc, char **argv) {
-    if (argc < 2) {
-        fprintf(stderr, "usage: %s <graph.json>\n", argv[0]);
-        return 1;
+/* Resolved (symlink-free, absolute) path to this running executable --
+ * used only if the Properties pane's Open button is ever clicked (see
+ * project_launcher.h), to find the sibling codemap-build binary and to
+ * relaunch. argv[0] alone isn't reliable (can be a bare name found via
+ * PATH, or relative to a cwd that's since changed), so macOS gets the
+ * real thing via _NSGetExecutablePath; elsewhere this falls back to
+ * resolving argv[0] itself, "should work, not verified" like this
+ * project's other non-macOS-specific paths. */
+static char *resolve_self_exe_path(const char *argv0) {
+#if defined(__APPLE__)
+    char buf[4096];
+    uint32_t size = sizeof(buf);
+    if (_NSGetExecutablePath(buf, &size) == 0) {
+        char *resolved = path_normalize(buf);
+        return resolved ? resolved : xstrdup(buf);
     }
+#endif
+    char *resolved = path_normalize(argv0);
+    return resolved ? resolved : xstrdup(argv0);
+}
+
+int main(int argc, char **argv) {
+    /* No graph.json is a valid way to launch now -- the Properties pane's
+     * Open button (see project_launcher.h) picks a directory, builds it,
+     * and execv()s a fresh copy of this same process with the result as
+     * argv[1], so the "real" startup path below only ever needs to
+     * handle "a graph.json was given" vs "nothing was given yet". */
+    const char *graph_path = (argc >= 2) ? argv[1] : NULL;
+    char *self_exe_path = resolve_self_exe_path(argv[0]);
 
     Graph graph;
-    if (!graph_read_json(argv[1], &graph)) {
-        fprintf(stderr, "error: could not read %s\n", argv[1]);
-        return 1;
+    if (graph_path) {
+        if (!graph_read_json(graph_path, &graph)) {
+            fprintf(stderr, "error: could not read %s\n", graph_path);
+            return 1;
+        }
+        printf("loaded %zu nodes, %zu edges from %s\n", graph.node_count, graph.edge_count, graph_path);
+    } else {
+        graph_init(&graph);
+        printf("no project loaded -- use Properties > Open to pick a directory\n");
     }
-    printf("loaded %zu nodes, %zu edges from %s\n", graph.node_count, graph.edge_count, argv[1]);
 
-    char *overlay_path = derive_sibling_path(argv[1], ".overlay.json");
-    char *notes_path = derive_sibling_path(argv[1], ".notes.md");
+    char *overlay_path = graph_path ? derive_sibling_path(graph_path, ".overlay.json") : NULL;
+    char *notes_path = graph_path ? derive_sibling_path(graph_path, ".notes.md") : NULL;
 
     Overlay overlay;
-    if (!overlay_read_json(overlay_path, &overlay)) {
-        fprintf(stderr, "warning: could not parse %s, ignoring\n", overlay_path);
+    if (overlay_path) {
+        if (!overlay_read_json(overlay_path, &overlay)) {
+            fprintf(stderr, "warning: could not parse %s, ignoring\n", overlay_path);
+        }
+    } else {
+        overlay_init(&overlay);
     }
 
     NoteSet notes;
-    notes_read_md(notes_path, &notes);
+    if (notes_path) {
+        notes_read_md(notes_path, &notes);
+    } else {
+        notes_init(&notes);
+    }
 
     Vec3 *positions = (Vec3 *)malloc(graph.node_count * sizeof(Vec3));
     layout3d_compute(&graph, positions, 300);
@@ -250,6 +295,11 @@ int main(int argc, char **argv) {
      * correctly treats nothing as covered. */
     PanelRect inspector_bounds = { 0, 0, 0, 0 };
     PanelRect note_bounds = { 0, 0, 0, 0 };
+    PanelRect properties_bounds = { 0, 0, 0, 0 };
+
+    /* Properties' "Show origin" checkbox state -- plain int (Nuklear's
+     * nk_bool, an int in this build), see properties_panel.h. */
+    int show_origin = 1;
 
     glEnable(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_DEPTH_TEST);
@@ -284,7 +334,8 @@ int main(int argc, char **argv) {
          * what broke all 3D-view mouse input the first time this was
          * wired up. */
         bool over_panel = panel_rect_contains(inspector_bounds, (float)mx, (float)my) ||
-                           panel_rect_contains(note_bounds, (float)mx, (float)my);
+                           panel_rect_contains(note_bounds, (float)mx, (float)my) ||
+                           panel_rect_contains(properties_bounds, (float)mx, (float)my);
         int left_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT);
         int middle_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_MIDDLE);
         int right_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT);
@@ -317,14 +368,17 @@ int main(int argc, char **argv) {
             bool is_double_click = (now - last_click_time) < 0.4 &&
                                     fabs(mx - last_click_x) < 6.0 && fabs(my - last_click_y) < 6.0;
             if (is_double_click) {
-                PanelRect insp_hdr = inspector_bounds, note_hdr = note_bounds;
-                insp_hdr.h = note_hdr.h = PANEL_HEADER_HEIGHT;
+                PanelRect insp_hdr = inspector_bounds, note_hdr = note_bounds, props_hdr = properties_bounds;
+                insp_hdr.h = note_hdr.h = props_hdr.h = PANEL_HEADER_HEIGHT;
                 if (panel_rect_contains(insp_hdr, (float)mx, (float)my)) {
                     nk_window_collapse(ctx, UI_PANEL_TITLE,
                         nk_window_is_collapsed(ctx, UI_PANEL_TITLE) ? NK_MAXIMIZED : NK_MINIMIZED);
                 } else if (panel_rect_contains(note_hdr, (float)mx, (float)my)) {
                     nk_window_collapse(ctx, NOTE_COMPOSE_TITLE,
                         nk_window_is_collapsed(ctx, NOTE_COMPOSE_TITLE) ? NK_MAXIMIZED : NK_MINIMIZED);
+                } else if (panel_rect_contains(props_hdr, (float)mx, (float)my)) {
+                    nk_window_collapse(ctx, PROPERTIES_PANEL_TITLE,
+                        nk_window_is_collapsed(ctx, PROPERTIES_PANEL_TITLE) ? NK_MAXIMIZED : NK_MINIMIZED);
                 }
                 last_click_time = -1.0; /* consumed -- a third click starts a fresh pair, not another toggle */
             } else {
@@ -442,6 +496,7 @@ int main(int argc, char **argv) {
             camera_zoom(&camera, scroll_y * step);
         }
 
+        char *picked_dir = NULL;
         {
             const char *sel_path = selected >= 0 ? graph.nodes[selected].path : NULL;
             const char *sel_lang = selected >= 0 ? graph.nodes[selected].language : NULL;
@@ -455,7 +510,9 @@ int main(int argc, char **argv) {
             ui_panel_draw(ctx, width, height, sel_path, sel_lang, cluster_paths, cluster_count,
                           &notes, notes_path, &inspector_bounds);
             note_compose_draw(ctx, &notes, notes_path, &note_bounds);
-            labels_draw(ctx, width, height, inspector_bounds, note_bounds, view_proj, positions, &graph, &notes);
+            picked_dir = properties_panel_draw(ctx, &show_origin, &properties_bounds);
+            labels_draw(ctx, width, height, inspector_bounds, note_bounds, properties_bounds,
+                        view_proj, positions, &graph, &notes);
         }
 
         int fb_width, fb_height;
@@ -465,10 +522,33 @@ int main(int argc, char **argv) {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         gl_scene_draw(&scene, view_proj, selected);
-        gl_scene_draw_axis(&scene, view_proj, AXIS_LENGTH);
+        if (show_origin) gl_scene_draw_axis(&scene, view_proj, AXIS_LENGTH);
 
         nk_glfw3_render(&glfw_nk, NK_ANTI_ALIASING_ON, MAX_VERTEX_BUFFER, MAX_ELEMENT_BUFFER);
         glfwSwapBuffers(win);
+
+        if (picked_dir) {
+            /* One extra, ad-hoc frame -- not part of the persistent
+             * window set above, just a status screen shown once before
+             * blocking on the (synchronous) build -- so it doesn't need
+             * any of the focus/z-order care those windows do. */
+            nk_glfw3_new_frame(&glfw_nk);
+            if (nk_begin(ctx, "##building", nk_rect(0, 0, (float)width, (float)height),
+                         NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_NO_INPUT)) {
+                nk_layout_row_dynamic(ctx, 30, 1);
+                nk_labelf(ctx, NK_TEXT_CENTERED, "Building %s ...", picked_dir);
+            }
+            nk_end(ctx);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            nk_glfw3_render(&glfw_nk, NK_ANTI_ALIASING_ON, MAX_VERTEX_BUFFER, MAX_ELEMENT_BUFFER);
+            glfwSwapBuffers(win);
+
+            /* Blocks; on success this execv()s a fresh process and never
+             * returns. On failure it's already shown a native error
+             * dialog, so just fall back into the normal loop. */
+            project_launcher_build_and_relaunch(self_exe_path, picked_dir);
+            free(picked_dir);
+        }
     }
 
     gl_scene_destroy(&scene);
@@ -486,5 +566,6 @@ int main(int argc, char **argv) {
     free((void *)cluster_paths);
     free(overlay_path);
     free(notes_path);
+    free(self_exe_path);
     return 0;
 }

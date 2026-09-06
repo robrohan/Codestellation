@@ -21,7 +21,7 @@ static const char *basename_of(const char *path) {
 }
 
 void labels_draw(struct nk_context *ctx, int window_width, int window_height,
-                  PanelRect inspector_bounds, PanelRect note_bounds,
+                  PanelRect inspector_bounds, PanelRect note_bounds, PanelRect properties_bounds,
                   const float *view_proj, const Vec3 *positions, const Graph *g, const NoteSet *notes) {
     nk_style_push_style_item(ctx, &ctx->style.window.fixed_background,
                               nk_style_item_color(nk_rgba(0, 0, 0, 0)));
@@ -46,7 +46,8 @@ void labels_draw(struct nk_context *ctx, int window_width, int window_height,
             float sx, sy;
             if (!project_to_screen(view_proj, positions[i], window_width, window_height, &sx, &sy)) continue;
             if (sx < 0 || sy < 0 || sy > (float)window_height) continue;
-            if (panel_rect_contains(inspector_bounds, sx, sy) || panel_rect_contains(note_bounds, sx, sy)) continue;
+            if (panel_rect_contains(inspector_bounds, sx, sy) || panel_rect_contains(note_bounds, sx, sy) ||
+                panel_rect_contains(properties_bounds, sx, sy)) continue;
 
             const char *name = basename_of(g->nodes[i].path);
             int len = (int)strlen(name);
