@@ -24,12 +24,18 @@
 #include "gl_scene.h"
 #include "picking.h"
 #include "ui_panel.h"
+#include "note_compose.h"
 #include "labels.h"
+#include "panel_rect.h"
 #include "../graph/graph.h"
 #include "../graph/graph_json.h"
+#include "../notes/filehash.h"
+#include "../notes/overlay.h"
+#include "../notes/notes.h"
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <math.h>
 
 #define MAX_VERTEX_BUFFER (512 * 1024)
@@ -62,6 +68,43 @@ static void rebuild_highlighted_edges(GLScene *scene, const Graph *graph, int no
     free(hi);
 }
 
+/* Adds node_id to cluster_ids if absent, removes it if present. Returns
+ * the new count. Only ever called with node_id >= 0 (a real pick hit), so
+ * unsigned int storage matches what gl_scene_set_cluster_points wants
+ * with no cast. */
+static size_t cluster_toggle(unsigned int **cluster_ids, size_t *cluster_count, size_t *cluster_cap,
+                              unsigned int node_id) {
+    for (size_t i = 0; i < *cluster_count; i++) {
+        if ((*cluster_ids)[i] == node_id) {
+            memmove(*cluster_ids + i, *cluster_ids + i + 1, (*cluster_count - i - 1) * sizeof(unsigned int));
+            (*cluster_count)--;
+            return *cluster_count;
+        }
+    }
+    if (*cluster_count == *cluster_cap) {
+        *cluster_cap = *cluster_cap ? *cluster_cap * 2 : 8;
+        *cluster_ids = (unsigned int *)realloc(*cluster_ids, *cluster_cap * sizeof(unsigned int));
+    }
+    (*cluster_ids)[(*cluster_count)++] = node_id;
+    return *cluster_count;
+}
+
+/* graph.json -> graph.overlay.json / graph.notes.md: sidecar files live
+ * next to whatever graph.json was loaded, found by convention rather than
+ * a CLI flag. Strips a trailing ".json" if present, then appends suffix. */
+static char *derive_sibling_path(const char *graph_path, const char *suffix) {
+    size_t len = strlen(graph_path);
+    static const char ext[] = ".json";
+    size_t ext_len = sizeof(ext) - 1;
+    size_t base_len = (len >= ext_len && strcmp(graph_path + len - ext_len, ext) == 0)
+                           ? len - ext_len : len;
+    size_t suffix_len = strlen(suffix);
+    char *out = (char *)malloc(base_len + suffix_len + 1);
+    memcpy(out, graph_path, base_len);
+    memcpy(out + base_len, suffix, suffix_len + 1); /* + NUL */
+    return out;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "usage: %s <graph.json>\n", argv[0]);
@@ -75,8 +118,34 @@ int main(int argc, char **argv) {
     }
     printf("loaded %zu nodes, %zu edges from %s\n", graph.node_count, graph.edge_count, argv[1]);
 
+    char *overlay_path = derive_sibling_path(argv[1], ".overlay.json");
+    char *notes_path = derive_sibling_path(argv[1], ".notes.md");
+
+    Overlay overlay;
+    if (!overlay_read_json(overlay_path, &overlay)) {
+        fprintf(stderr, "warning: could not parse %s, ignoring\n", overlay_path);
+    }
+
+    NoteSet notes;
+    notes_read_md(notes_path, &notes);
+
     Vec3 *positions = (Vec3 *)malloc(graph.node_count * sizeof(Vec3));
     layout3d_compute(&graph, positions, 300);
+
+    /* Overlay any manually-dragged positions on top of the fresh layout.
+     * A hash mismatch (the file changed since the position was saved) is
+     * advisory, not blocking -- the position still applies. */
+    for (size_t i = 0; i < graph.node_count; i++) {
+        const OverlayEntry *e = overlay_find(&overlay, graph.nodes[i].path);
+        if (!e) continue;
+        positions[i].x = e->x;
+        positions[i].y = e->y;
+        positions[i].z = e->z;
+        uint64_t current_hash;
+        if (file_content_hash(graph.nodes[i].path, &current_hash) && current_hash != e->hash) {
+            printf("note: %s changed since its position was saved (possibly stale)\n", graph.nodes[i].path);
+        }
+    }
 
     unsigned int *edge_indices = (unsigned int *)malloc(graph.edge_count * 2 * sizeof(unsigned int));
     for (size_t i = 0; i < graph.edge_count; i++) {
@@ -139,13 +208,42 @@ int main(int argc, char **argv) {
     double last_mouse_x = 0, last_mouse_y = 0;
     Vec3 drag_plane_normal = { 0, 0, 1 };
 
+    /* Ctrl/Cmd+right-click toggles a node in/out of this set instead of
+     * replacing `selected` -- see the group-mode branch below. Rebuilt
+     * into `cluster_paths` each frame the count changes (cheap at the
+     * node counts this app targets) so ui_panel_draw/gl_scene can take
+     * plain path/id arrays without knowing about node-selection internals. */
+    unsigned int *cluster_ids = NULL;
+    size_t cluster_count = 0, cluster_cap = 0;
+    const char **cluster_paths = NULL;
+    size_t cluster_paths_cap = 0;
+
     /* Right-click doubles as both "pan" (drag) and "select" (click with
      * no real movement) -- these track which button started the current
      * pan and whether it has moved enough to count as a drag rather
      * than a click. */
     bool pan_via_right = false;
+    bool cluster_modifier_at_press = false;
     double press_x = 0, press_y = 0;
     bool moved_since_press = false;
+    bool left_was_down = false;
+
+    /* Double-click-a-panel's-header-to-shade: nuklear's own
+     * NK_WINDOW_MINIMIZABLE only adds a click-to-collapse icon in the
+     * header, not a double-click-the-header-itself gesture, so this is
+     * bolted on ourselves via nk_window_collapse/nk_window_is_collapsed
+     * (both public API, no vendor patch needed). */
+    double last_click_time = -1.0;
+    double last_click_x = 0.0, last_click_y = 0.0;
+
+    /* Populated at the end of each frame from ui_panel_draw/note_compose_draw's
+     * own out-params; read at the *start* of the next frame (one-frame
+     * latent, same as any immediate-mode UI querying its own last layout)
+     * to gate 3D camera/pick interaction -- see over_panel below. Zero-init
+     * so the very first frame (before either panel has ever been drawn)
+     * correctly treats nothing as covered. */
+    PanelRect inspector_bounds = { 0, 0, 0, 0 };
+    PanelRect note_bounds = { 0, 0, 0, 0 };
 
     glEnable(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_DEPTH_TEST);
@@ -155,6 +253,8 @@ int main(int argc, char **argv) {
         if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
             glfwSetWindowShouldClose(win, GLFW_TRUE);
         }
+
+        nk_glfw3_new_frame(&glfw_nk);
 
         int width, height;
         glfwGetWindowSize(win, &width, &height);
@@ -167,17 +267,71 @@ int main(int argc, char **argv) {
 
         double mx, my;
         glfwGetCursorPos(win, &mx, &my);
-        int panel_x = width - UI_PANEL_WIDTH;
-        bool over_panel = mx >= (double)panel_x;
+        /* Inspector/Note are now independently movable/resizable floating
+         * panels, not a fixed strip pinned to the right edge -- checked
+         * against their own tracked bounds from last frame (one-frame
+         * latent, same as any immediate-mode UI querying its own last
+         * layout), not nuklear's nk_window_is_any_hovered: that considers
+         * every non-hidden window, including the always-present,
+         * fullscreen NK_WINDOW_NO_INPUT label overlay in labels.c, and so
+         * reports "hovered" everywhere, all the time -- which is exactly
+         * what broke all 3D-view mouse input the first time this was
+         * wired up. */
+        bool over_panel = panel_rect_contains(inspector_bounds, (float)mx, (float)my) ||
+                           panel_rect_contains(note_bounds, (float)mx, (float)my);
         int left_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT);
         int middle_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_MIDDLE);
         int right_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT);
         bool pan_button_down = (middle_state == GLFW_PRESS || right_state == GLFW_PRESS);
 
+        /* Gated on the actual press *edge* (left_state == GLFW_PRESS &&
+         * !left_was_down), not just "is currently pressed": while
+         * over_panel was true, interact stays INTERACT_NONE and the
+         * block below re-runs every frame the button is still held.
+         * Inspector/Note are movable/resizable now, so their bounds (and
+         * over_panel, one-frame-latent by nature) can shift *during* an
+         * ongoing drag on the panel itself -- without the edge check, a
+         * frame or two into dragging the panel's title bar or resize
+         * handle, over_panel could briefly read false against the
+         * panel's just-moved bounds and wrongly start an orbit mid-drag,
+         * even though the mouse button was never released. Latching the
+         * decision to the press edge means it's made once, using
+         * over_panel as of that exact frame, and never revisited for the
+         * rest of the hold no matter how the panel moves under it
+         * afterward. */
+        bool left_pressed_edge = (left_state == GLFW_PRESS && !left_was_down);
+
+        if (left_pressed_edge) {
+            /* Double-click a panel's header (title bar) to shade/unshade
+             * it -- checked against last frame's tracked bounds clipped
+             * to just the header strip, same latency as over_panel. Not
+             * gated on over_panel itself since that's whole-panel, and
+             * this only ever fires within the header sliver anyway. */
+            double now = glfwGetTime();
+            bool is_double_click = (now - last_click_time) < 0.4 &&
+                                    fabs(mx - last_click_x) < 6.0 && fabs(my - last_click_y) < 6.0;
+            if (is_double_click) {
+                PanelRect insp_hdr = inspector_bounds, note_hdr = note_bounds;
+                insp_hdr.h = note_hdr.h = PANEL_HEADER_HEIGHT;
+                if (panel_rect_contains(insp_hdr, (float)mx, (float)my)) {
+                    nk_window_collapse(ctx, UI_PANEL_TITLE,
+                        nk_window_is_collapsed(ctx, UI_PANEL_TITLE) ? NK_MAXIMIZED : NK_MINIMIZED);
+                } else if (panel_rect_contains(note_hdr, (float)mx, (float)my)) {
+                    nk_window_collapse(ctx, NOTE_COMPOSE_TITLE,
+                        nk_window_is_collapsed(ctx, NOTE_COMPOSE_TITLE) ? NK_MAXIMIZED : NK_MINIMIZED);
+                }
+                last_click_time = -1.0; /* consumed -- a third click starts a fresh pair, not another toggle */
+            } else {
+                last_click_time = now;
+                last_click_x = mx;
+                last_click_y = my;
+            }
+        }
+
         if (interact == INTERACT_NONE) {
             /* Left button: always reposition-drag on a node, or orbit on
              * empty space -- never touches selection. */
-            if (left_state == GLFW_PRESS && !over_panel) {
+            if (left_pressed_edge && !over_panel) {
                 int hit = pick_nearest_node(view_proj, positions, graph.node_count, width, height,
                                              (float)mx, (float)my, PICK_RADIUS_PX);
                 if (hit >= 0) {
@@ -194,6 +348,11 @@ int main(int argc, char **argv) {
             } else if (pan_button_down && !over_panel) {
                 interact = INTERACT_PAN;
                 pan_via_right = (right_state == GLFW_PRESS);
+                cluster_modifier_at_press =
+                    glfwGetKey(win, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+                    glfwGetKey(win, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS ||
+                    glfwGetKey(win, GLFW_KEY_LEFT_SUPER) == GLFW_PRESS ||
+                    glfwGetKey(win, GLFW_KEY_RIGHT_SUPER) == GLFW_PRESS;
                 press_x = mx;
                 press_y = my;
                 moved_since_press = false;
@@ -207,9 +366,36 @@ int main(int argc, char **argv) {
                  * select/deselect click, not a pan -- act on it now,
                  * at release, using the current cursor position. */
                 if (interact == INTERACT_PAN && pan_via_right && !moved_since_press) {
-                    selected = pick_nearest_node(view_proj, positions, graph.node_count, width, height,
-                                                  (float)mx, (float)my, PICK_RADIUS_PX);
-                    rebuild_highlighted_edges(&scene, &graph, selected);
+                    int hit = pick_nearest_node(view_proj, positions, graph.node_count, width, height,
+                                                 (float)mx, (float)my, PICK_RADIUS_PX);
+                    if (cluster_modifier_at_press) {
+                        /* Building/editing a cluster -- independent of
+                         * `selected` and its edge highlight entirely. */
+                        if (hit >= 0) {
+                            cluster_toggle(&cluster_ids, &cluster_count, &cluster_cap, (unsigned int)hit);
+                            gl_scene_set_cluster_points(&scene, cluster_ids, cluster_count);
+                        }
+                    } else {
+                        selected = hit;
+                        rebuild_highlighted_edges(&scene, &graph, selected);
+                        /* Plain select is the obvious way back out of group
+                         * mode -- clear the cluster rather than leaving it
+                         * active alongside a new single selection. */
+                        cluster_count = 0;
+                        gl_scene_set_cluster_points(&scene, NULL, 0);
+                    }
+                } else if (interact == INTERACT_DRAG && drag_node >= 0) {
+                    /* Drag just ended -- persist the new position immediately.
+                     * The file is tiny and this is the only save trigger, so
+                     * writing on every release (rather than debouncing) keeps
+                     * "if I move something it stays there" true with no
+                     * separate save step. */
+                    uint64_t h;
+                    if (file_content_hash(graph.nodes[drag_node].path, &h)) {
+                        overlay_set(&overlay, graph.nodes[drag_node].path, h,
+                                    positions[drag_node].x, positions[drag_node].y, positions[drag_node].z);
+                        overlay_write_json(&overlay, overlay_path);
+                    }
                 }
                 interact = INTERACT_NONE;
                 drag_node = -1;
@@ -237,8 +423,7 @@ int main(int argc, char **argv) {
                 last_mouse_y = my;
             }
         }
-
-        nk_glfw3_new_frame(&glfw_nk);
+        left_was_down = (left_state == GLFW_PRESS);
 
         float scroll_y = ctx->input.mouse.scroll_delta.y;
         if (scroll_y != 0.0f && !over_panel) {
@@ -254,8 +439,17 @@ int main(int argc, char **argv) {
         {
             const char *sel_path = selected >= 0 ? graph.nodes[selected].path : NULL;
             const char *sel_lang = selected >= 0 ? graph.nodes[selected].language : NULL;
-            ui_panel_draw(ctx, width, height, sel_path, sel_lang);
-            labels_draw(ctx, width, height, panel_x, view_proj, positions, &graph);
+
+            if (cluster_count > cluster_paths_cap) {
+                cluster_paths_cap = cluster_count;
+                cluster_paths = (const char **)realloc((void *)cluster_paths, cluster_paths_cap * sizeof(char *));
+            }
+            for (size_t i = 0; i < cluster_count; i++) cluster_paths[i] = graph.nodes[cluster_ids[i]].path;
+
+            ui_panel_draw(ctx, width, height, sel_path, sel_lang, cluster_paths, cluster_count,
+                          &notes, notes_path, &inspector_bounds);
+            note_compose_draw(ctx, &notes, notes_path, &note_bounds);
+            labels_draw(ctx, width, height, inspector_bounds, note_bounds, view_proj, positions, &graph, &notes);
         }
 
         int fb_width, fb_height;
@@ -279,5 +473,11 @@ int main(int argc, char **argv) {
     free(positions);
     free(edge_indices);
     graph_free(&graph);
+    overlay_free(&overlay);
+    notes_free(&notes);
+    free(cluster_ids);
+    free((void *)cluster_paths);
+    free(overlay_path);
+    free(notes_path);
     return 0;
 }

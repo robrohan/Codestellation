@@ -13,6 +13,8 @@ typedef struct {
     GLuint axis_vao, axis_vbo;
     GLuint highlight_ebo;
     GLsizei highlight_index_count;
+    GLuint cluster_ebo;
+    GLsizei cluster_point_count;
 } GLScene;
 
 void gl_scene_init(GLScene *scene);
@@ -38,6 +40,13 @@ void gl_scene_draw(const GLScene *scene, const float *mvp, int highlight_index);
  * touch it (or edge_count 0 to clear). Same index format as
  * gl_scene_upload's edge_indices. */
 void gl_scene_set_highlighted_edges(GLScene *scene, const unsigned int *edge_indices, size_t edge_count);
+
+/* Replaces the set of nodes drawn as a distinct-colored "cluster" point
+ * pass on top of the normal points -- the multi-select accent, independent
+ * of gl_scene_draw's own single `highlight_index`. node_ids are node
+ * (== position array) indices, same as gl_scene_upload's edge_indices.
+ * count 0 clears it. */
+void gl_scene_set_cluster_points(GLScene *scene, const unsigned int *node_ids, size_t count);
 
 /* Small RGB axis gizmo at the world origin (X=red, Y=green, Z=blue),
  * length in world units -- just an orientation anchor while flying

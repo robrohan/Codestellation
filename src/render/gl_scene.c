@@ -64,6 +64,7 @@ void gl_scene_init(GLScene *scene) {
     glGenBuffers(1, &scene->vbo);
     glGenBuffers(1, &scene->ebo);
     glGenBuffers(1, &scene->highlight_ebo);
+    glGenBuffers(1, &scene->cluster_ebo);
 
     glBindVertexArray(scene->vao);
     glBindBuffer(GL_ARRAY_BUFFER, scene->vbo);
@@ -82,6 +83,7 @@ void gl_scene_init(GLScene *scene) {
     scene->edge_index_count = 0;
     scene->point_count = 0;
     scene->highlight_index_count = 0;
+    scene->cluster_point_count = 0;
 
     /* Axis gizmo: 3 segments (origin -> X/Y/Z). Re-uploaded (6 floats*3,
      * trivially cheap) each gl_scene_draw_axis call rather than cached,
@@ -118,6 +120,12 @@ void gl_scene_set_highlighted_edges(GLScene *scene, const unsigned int *edge_ind
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(edge_count * 2 * sizeof(unsigned int)), edge_indices, GL_DYNAMIC_DRAW);
 }
 
+void gl_scene_set_cluster_points(GLScene *scene, const unsigned int *node_ids, size_t count) {
+    scene->cluster_point_count = (GLsizei)count;
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, scene->cluster_ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(count * sizeof(unsigned int)), node_ids, GL_DYNAMIC_DRAW);
+}
+
 void gl_scene_draw(const GLScene *scene, const float *mvp, int highlight_index) {
     glUseProgram(scene->prog);
     glUniformMatrix4fv(scene->u_mvp, 1, GL_FALSE, mvp);
@@ -147,6 +155,12 @@ void gl_scene_draw(const GLScene *scene, const float *mvp, int highlight_index) 
     if (highlight_index >= 0 && highlight_index < scene->point_count) {
         glUniform4f(scene->u_color, 1.0f, 0.35f, 0.35f, 1.0f);
         glDrawArrays(GL_POINTS, highlight_index, 1);
+    }
+
+    if (scene->cluster_point_count > 0) {
+        glUniform4f(scene->u_color, 0.35f, 0.95f, 0.45f, 1.0f); /* multi-select accent, green */
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, scene->cluster_ebo);
+        glDrawElements(GL_POINTS, scene->cluster_point_count, GL_UNSIGNED_INT, 0);
     }
 
     glBindVertexArray(0);
@@ -180,6 +194,7 @@ void gl_scene_destroy(GLScene *scene) {
     glDeleteBuffers(1, &scene->vbo);
     glDeleteBuffers(1, &scene->ebo);
     glDeleteBuffers(1, &scene->highlight_ebo);
+    glDeleteBuffers(1, &scene->cluster_ebo);
     glDeleteVertexArrays(1, &scene->vao);
     glDeleteBuffers(1, &scene->axis_vbo);
     glDeleteVertexArrays(1, &scene->axis_vao);

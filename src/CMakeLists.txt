@@ -23,12 +23,16 @@ add_executable(codemap-view
     common/pathutil.c
     graph/graph.c
     graph/graph_json.c
+    notes/filehash.c
+    notes/overlay.c
+    notes/notes.c
     render/main.c
     render/camera.c
     render/layout3d.c
     render/gl_scene.c
     render/picking.c
     render/ui_panel.c
+    render/note_compose.c
     render/labels.c
 )
 target_include_directories(codemap-view PRIVATE
