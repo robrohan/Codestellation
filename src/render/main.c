@@ -24,7 +24,9 @@
 #include "gl_scene.h"
 #include "picking.h"
 #include "ui_panel.h"
+#include "note_compose.h"
 #include "labels.h"
+#include "panel_rect.h"
 #include "../graph/graph.h"
 #include "../graph/graph_json.h"
 #include "../notes/filehash.h"
@@ -224,6 +226,24 @@ int main(int argc, char **argv) {
     bool cluster_modifier_at_press = false;
     double press_x = 0, press_y = 0;
     bool moved_since_press = false;
+    bool left_was_down = false;
+
+    /* Double-click-a-panel's-header-to-shade: nuklear's own
+     * NK_WINDOW_MINIMIZABLE only adds a click-to-collapse icon in the
+     * header, not a double-click-the-header-itself gesture, so this is
+     * bolted on ourselves via nk_window_collapse/nk_window_is_collapsed
+     * (both public API, no vendor patch needed). */
+    double last_click_time = -1.0;
+    double last_click_x = 0.0, last_click_y = 0.0;
+
+    /* Populated at the end of each frame from ui_panel_draw/note_compose_draw's
+     * own out-params; read at the *start* of the next frame (one-frame
+     * latent, same as any immediate-mode UI querying its own last layout)
+     * to gate 3D camera/pick interaction -- see over_panel below. Zero-init
+     * so the very first frame (before either panel has ever been drawn)
+     * correctly treats nothing as covered. */
+    PanelRect inspector_bounds = { 0, 0, 0, 0 };
+    PanelRect note_bounds = { 0, 0, 0, 0 };
 
     glEnable(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_DEPTH_TEST);
@@ -233,6 +253,8 @@ int main(int argc, char **argv) {
         if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
             glfwSetWindowShouldClose(win, GLFW_TRUE);
         }
+
+        nk_glfw3_new_frame(&glfw_nk);
 
         int width, height;
         glfwGetWindowSize(win, &width, &height);
@@ -245,17 +267,71 @@ int main(int argc, char **argv) {
 
         double mx, my;
         glfwGetCursorPos(win, &mx, &my);
-        int panel_x = width - UI_PANEL_WIDTH;
-        bool over_panel = mx >= (double)panel_x;
+        /* Inspector/Note are now independently movable/resizable floating
+         * panels, not a fixed strip pinned to the right edge -- checked
+         * against their own tracked bounds from last frame (one-frame
+         * latent, same as any immediate-mode UI querying its own last
+         * layout), not nuklear's nk_window_is_any_hovered: that considers
+         * every non-hidden window, including the always-present,
+         * fullscreen NK_WINDOW_NO_INPUT label overlay in labels.c, and so
+         * reports "hovered" everywhere, all the time -- which is exactly
+         * what broke all 3D-view mouse input the first time this was
+         * wired up. */
+        bool over_panel = panel_rect_contains(inspector_bounds, (float)mx, (float)my) ||
+                           panel_rect_contains(note_bounds, (float)mx, (float)my);
         int left_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT);
         int middle_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_MIDDLE);
         int right_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT);
         bool pan_button_down = (middle_state == GLFW_PRESS || right_state == GLFW_PRESS);
 
+        /* Gated on the actual press *edge* (left_state == GLFW_PRESS &&
+         * !left_was_down), not just "is currently pressed": while
+         * over_panel was true, interact stays INTERACT_NONE and the
+         * block below re-runs every frame the button is still held.
+         * Inspector/Note are movable/resizable now, so their bounds (and
+         * over_panel, one-frame-latent by nature) can shift *during* an
+         * ongoing drag on the panel itself -- without the edge check, a
+         * frame or two into dragging the panel's title bar or resize
+         * handle, over_panel could briefly read false against the
+         * panel's just-moved bounds and wrongly start an orbit mid-drag,
+         * even though the mouse button was never released. Latching the
+         * decision to the press edge means it's made once, using
+         * over_panel as of that exact frame, and never revisited for the
+         * rest of the hold no matter how the panel moves under it
+         * afterward. */
+        bool left_pressed_edge = (left_state == GLFW_PRESS && !left_was_down);
+
+        if (left_pressed_edge) {
+            /* Double-click a panel's header (title bar) to shade/unshade
+             * it -- checked against last frame's tracked bounds clipped
+             * to just the header strip, same latency as over_panel. Not
+             * gated on over_panel itself since that's whole-panel, and
+             * this only ever fires within the header sliver anyway. */
+            double now = glfwGetTime();
+            bool is_double_click = (now - last_click_time) < 0.4 &&
+                                    fabs(mx - last_click_x) < 6.0 && fabs(my - last_click_y) < 6.0;
+            if (is_double_click) {
+                PanelRect insp_hdr = inspector_bounds, note_hdr = note_bounds;
+                insp_hdr.h = note_hdr.h = PANEL_HEADER_HEIGHT;
+                if (panel_rect_contains(insp_hdr, (float)mx, (float)my)) {
+                    nk_window_collapse(ctx, UI_PANEL_TITLE,
+                        nk_window_is_collapsed(ctx, UI_PANEL_TITLE) ? NK_MAXIMIZED : NK_MINIMIZED);
+                } else if (panel_rect_contains(note_hdr, (float)mx, (float)my)) {
+                    nk_window_collapse(ctx, NOTE_COMPOSE_TITLE,
+                        nk_window_is_collapsed(ctx, NOTE_COMPOSE_TITLE) ? NK_MAXIMIZED : NK_MINIMIZED);
+                }
+                last_click_time = -1.0; /* consumed -- a third click starts a fresh pair, not another toggle */
+            } else {
+                last_click_time = now;
+                last_click_x = mx;
+                last_click_y = my;
+            }
+        }
+
         if (interact == INTERACT_NONE) {
             /* Left button: always reposition-drag on a node, or orbit on
              * empty space -- never touches selection. */
-            if (left_state == GLFW_PRESS && !over_panel) {
+            if (left_pressed_edge && !over_panel) {
                 int hit = pick_nearest_node(view_proj, positions, graph.node_count, width, height,
                                              (float)mx, (float)my, PICK_RADIUS_PX);
                 if (hit >= 0) {
@@ -347,8 +423,7 @@ int main(int argc, char **argv) {
                 last_mouse_y = my;
             }
         }
-
-        nk_glfw3_new_frame(&glfw_nk);
+        left_was_down = (left_state == GLFW_PRESS);
 
         float scroll_y = ctx->input.mouse.scroll_delta.y;
         if (scroll_y != 0.0f && !over_panel) {
@@ -371,8 +446,10 @@ int main(int argc, char **argv) {
             }
             for (size_t i = 0; i < cluster_count; i++) cluster_paths[i] = graph.nodes[cluster_ids[i]].path;
 
-            ui_panel_draw(ctx, width, height, sel_path, sel_lang, cluster_paths, cluster_count, &notes, notes_path);
-            labels_draw(ctx, width, height, panel_x, view_proj, positions, &graph, &notes);
+            ui_panel_draw(ctx, width, height, sel_path, sel_lang, cluster_paths, cluster_count,
+                          &notes, notes_path, &inspector_bounds);
+            note_compose_draw(ctx, &notes, notes_path, &note_bounds);
+            labels_draw(ctx, width, height, inspector_bounds, note_bounds, view_proj, positions, &graph, &notes);
         }
 
         int fb_width, fb_height;

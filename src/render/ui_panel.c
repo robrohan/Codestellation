@@ -8,8 +8,8 @@
 #include "nuklear.h"
 
 #include "ui_panel.h"
+#include "note_compose.h"
 #include "../common/pathutil.h"
-#include "../notes/filehash.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,38 +18,19 @@
 static char *g_cached_path = NULL;
 static char *g_cached_content = NULL;
 
-/* Notes compose-box state. Only one compose box is ever visible at a time
- * (single-file mode or group mode, never both), so one set of statics
- * covers either. Reset whenever the selection context changes -- see
- * reset_compose_if_context_changed -- so a half-written note or an
- * "editing note n3" session never bleeds into a different file/cluster. */
-static char g_compose_body[4096] = "";
-static nk_bool g_compose_has_line = nk_false;
-static int g_compose_line = 1;
-static bool g_compose_editing = false;
-static char g_compose_editing_id[16] = "";
+/* Two-step delete confirmation for the notes list -- see draw_note_row.
+ * Reset whenever the selection context changes so an armed "Confirm?" on
+ * one file's note doesn't silently carry over and land on the wrong note
+ * if the user switches selection and clicks Delete again in the same
+ * screen position. */
 static char g_pending_delete_id[16] = "";
+static char g_delete_arm_context[512] = "";
 
-/* Identifies "what the compose box is currently about" so a selection
- * change can reset it. Single-file mode: the path. Group mode: nothing
- * sane to key on but the path list itself, so just the count plus first
- * path is good enough to notice "the cluster changed". */
-static char g_compose_context[512] = "";
-
-static void reset_compose(void) {
-    g_compose_body[0] = '\0';
-    g_compose_has_line = nk_false;
-    g_compose_line = 1;
-    g_compose_editing = false;
-    g_compose_editing_id[0] = '\0';
-    g_pending_delete_id[0] = '\0';
-}
-
-static void reset_compose_if_context_changed(const char *context) {
-    if (strcmp(g_compose_context, context) != 0) {
-        reset_compose();
-        strncpy(g_compose_context, context, sizeof(g_compose_context) - 1);
-        g_compose_context[sizeof(g_compose_context) - 1] = '\0';
+static void reset_delete_arm_if_context_changed(const char *context) {
+    if (strcmp(g_delete_arm_context, context) != 0) {
+        g_pending_delete_id[0] = '\0';
+        strncpy(g_delete_arm_context, context, sizeof(g_delete_arm_context) - 1);
+        g_delete_arm_context[sizeof(g_delete_arm_context) - 1] = '\0';
     }
 }
 
@@ -84,12 +65,13 @@ static void load_file_if_needed(const char *path) {
     g_cached_content = buf;
 }
 
-/* One note's summary line + body preview + Edit/Delete. Sets *edit_target
- * / *delete_target (both assumed pre-cleared by the caller) if their
- * button was clicked this frame -- deferred rather than acted on
- * immediately since acting mid-list would invalidate `notes`. */
-static void draw_note_row(struct nk_context *ctx, const Note *note,
-                           const Note **edit_target, const Note **delete_target) {
+/* One note's summary line + body preview + Edit/Delete. Edit opens the
+ * separate Note compose pane directly (safe mid-list, it only copies the
+ * note's fields into that pane's own state). Delete is deferred via
+ * *delete_target instead -- acting on it immediately would call
+ * notes_delete_note, which frees/reloads the very `notes->notes` array
+ * this loop is iterating pointers into. */
+static void draw_note_row(struct nk_context *ctx, const Note *note, const Note **delete_target) {
     nk_layout_row_dynamic(ctx, 16, 1);
     if (note->path) {
         if (note->has_line) nk_labelf(ctx, NK_TEXT_LEFT, "[%s] line %d \xc2\xb7 %s", note->id, note->line, note->updated);
@@ -101,7 +83,7 @@ static void draw_note_row(struct nk_context *ctx, const Note *note,
     nk_label_wrap(ctx, note->body);
 
     nk_layout_row_dynamic(ctx, 20, 2);
-    if (nk_button_label(ctx, "Edit")) *edit_target = note;
+    if (nk_button_label(ctx, "Edit")) note_compose_open_edit(note);
     bool pending = strcmp(g_pending_delete_id, note->id) == 0;
     if (nk_button_label(ctx, pending ? "Confirm?" : "Delete")) {
         if (pending) {
@@ -116,55 +98,12 @@ static void draw_note_row(struct nk_context *ctx, const Note *note,
     }
 }
 
-static void begin_edit(const Note *note) {
-    strncpy(g_compose_body, note->body ? note->body : "", sizeof(g_compose_body) - 1);
-    g_compose_body[sizeof(g_compose_body) - 1] = '\0';
-    g_compose_has_line = note->has_line ? nk_true : nk_false;
-    g_compose_line = note->has_line ? note->line : 1;
-    g_compose_editing = true;
-    strncpy(g_compose_editing_id, note->id, sizeof(g_compose_editing_id) - 1);
-    g_compose_editing_id[sizeof(g_compose_editing_id) - 1] = '\0';
-    g_pending_delete_id[0] = '\0';
-}
-
-/* Line-anchor checkbox + line number property + editable body + Save/Add
- * and (only while editing) Cancel. `on_save` does the actual
- * append/update call and is given the current compose fields. */
-static void draw_compose_box(struct nk_context *ctx, bool allow_line_toggle,
-                              bool *out_save_clicked, bool *out_cancel_clicked) {
-    *out_save_clicked = false;
-    *out_cancel_clicked = false;
-
-    if (allow_line_toggle) {
-        nk_layout_row_dynamic(ctx, 24, 2);
-        nk_checkbox_label(ctx, "Anchor to line", &g_compose_has_line);
-        if (g_compose_has_line) {
-            nk_property_int(ctx, "Line", 1, &g_compose_line, 1000000, 1, 1);
-        } else {
-            nk_spacing(ctx, 1);
-        }
-    }
-
-    nk_layout_row_dynamic(ctx, 80, 1);
-    nk_edit_string_zero_terminated(ctx, NK_EDIT_BOX, g_compose_body, sizeof(g_compose_body), nk_filter_default);
-
-    if (g_compose_editing) {
-        nk_layout_row_dynamic(ctx, 24, 2);
-        *out_save_clicked = nk_button_label(ctx, "Save");
-        *out_cancel_clicked = nk_button_label(ctx, "Cancel");
-    } else {
-        nk_layout_row_dynamic(ctx, 24, 1);
-        *out_save_clicked = nk_button_label(ctx, "Add note");
-    }
-}
-
-static void draw_group_mode(struct nk_context *ctx, int window_height,
-                             const char **cluster_paths, size_t cluster_count,
+static void draw_group_mode(struct nk_context *ctx, const char **cluster_paths, size_t cluster_count,
                              NoteSet *notes, const char *notes_md_path) {
     char context[512];
     snprintf(context, sizeof(context), "group:%zu:%s", cluster_count,
              cluster_count > 0 ? cluster_paths[0] : "");
-    reset_compose_if_context_changed(context);
+    reset_delete_arm_if_context_changed(context);
 
     nk_layout_row_dynamic(ctx, 20, 1);
     nk_labelf(ctx, NK_TEXT_LEFT, "%zu files selected", cluster_count);
@@ -178,42 +117,34 @@ static void draw_group_mode(struct nk_context *ctx, int window_height,
         nk_group_end(ctx);
     }
 
-    (void)window_height;
-
     const Note *found[64];
     size_t found_n = notes_find_for_group(notes, cluster_paths, cluster_count, found, 64);
 
     nk_layout_row_dynamic(ctx, 20, 1);
-    nk_label(ctx, "Notes", NK_TEXT_LEFT);
+    nk_labelf(ctx, NK_TEXT_LEFT, "Notes (%zu)", found_n);
 
-    const Note *edit_target = NULL, *delete_target = NULL;
-    nk_layout_row_dynamic(ctx, 130, 1);
+    const Note *delete_target = NULL;
+    nk_layout_row_dynamic(ctx, 150, 1);
     if (nk_group_begin(ctx, "group_notes", NK_WINDOW_BORDER)) {
-        for (size_t i = 0; i < found_n; i++) draw_note_row(ctx, found[i], &edit_target, &delete_target);
+        for (size_t i = 0; i < found_n; i++) draw_note_row(ctx, found[i], &delete_target);
         nk_group_end(ctx);
     }
-    if (edit_target) begin_edit(edit_target);
-    if (delete_target) notes_delete_note(notes_md_path, notes, delete_target->id);
+    if (delete_target) {
+        notes_delete_note(notes_md_path, notes, delete_target->id);
+        g_pending_delete_id[0] = '\0';
+    }
 
-    bool save_clicked, cancel_clicked;
-    draw_compose_box(ctx, false, &save_clicked, &cancel_clicked);
-    if (cancel_clicked) {
-        reset_compose();
-    } else if (save_clicked) {
-        if (g_compose_editing) {
-            notes_update_note(notes_md_path, notes, g_compose_editing_id, false, 0, g_compose_body);
-        } else {
-            notes_append_group_note(notes_md_path, notes, cluster_paths, cluster_count, g_compose_body);
-        }
-        reset_compose();
+    nk_layout_row_dynamic(ctx, 26, 1);
+    if (nk_button_label(ctx, "+ Add group note")) {
+        note_compose_open_add(cluster_paths, cluster_count, false, 1);
     }
 }
 
-static void draw_single_mode(struct nk_context *ctx, int window_width, int window_height,
+static void draw_single_mode(struct nk_context *ctx, float panel_h,
                               const char *selected_path, const char *selected_language,
                               NoteSet *notes, const char *notes_md_path) {
     load_file_if_needed(selected_path);
-    reset_compose_if_context_changed(selected_path ? selected_path : "");
+    reset_delete_arm_if_context_changed(selected_path ? selected_path : "");
 
     if (!selected_path) {
         nk_layout_row_dynamic(ctx, 20, 1);
@@ -229,15 +160,20 @@ static void draw_single_mode(struct nk_context *ctx, int window_width, int windo
     nk_layout_row_dynamic(ctx, 40, 1);
     nk_label_wrap(ctx, selected_path);
 
-    /* Reserve fixed heights for everything below the content viewer (notes
-     * label, notes list, compose controls, compose body, compose buttons),
-     * same "whatever's left" approach the original single-section layout
-     * used (window_height - 110). */
-    const float notes_label_h = 20.0f, notes_list_h = 120.0f;
-    const float compose_controls_h = 26.0f, compose_body_h = 80.0f, compose_buttons_h = 26.0f;
-    const float reserved = 110.0f + notes_label_h + notes_list_h + compose_controls_h +
-                            compose_body_h + compose_buttons_h;
-    float content_h = (float)window_height - reserved;
+    /* Reserve fixed heights for everything below the content viewer
+     * (notes label, notes list, the add-note button), same "whatever's
+     * left" approach as before -- just a much smaller reservation now
+     * that the compose box lives in its own pane instead of here. The
+     * 140 base (rather than the raw ~110 the fixed rows above actually
+     * sum to) is deliberate slack: nuklear adds a small gap between each
+     * stacked row, and with this many rows that adds up to more than it
+     * looks like -- too little slack here was pushing total content a
+     * few px past the window, triggering this window's own scrollbar for
+     * completely ordinary-sized content (nothing actually needing to
+     * scroll). Better to keep a bit of daylight than fight that again. */
+    const float notes_label_h = 20.0f, notes_list_h = 150.0f, add_button_h = 30.0f;
+    const float reserved = 140.0f + notes_label_h + notes_list_h + add_button_h;
+    float content_h = panel_h - reserved;
     if (content_h < 60.0f) content_h = 60.0f;
 
     nk_layout_row_dynamic(ctx, content_h, 1);
@@ -252,59 +188,57 @@ static void draw_single_mode(struct nk_context *ctx, int window_width, int windo
     nk_layout_row_dynamic(ctx, notes_label_h, 1);
     nk_labelf(ctx, NK_TEXT_LEFT, "Notes (%zu)", found_n);
 
-    const Note *edit_target = NULL, *delete_target = NULL;
+    const Note *delete_target = NULL;
     nk_layout_row_dynamic(ctx, notes_list_h, 1);
     if (nk_group_begin(ctx, "file_notes", NK_WINDOW_BORDER)) {
-        for (size_t i = 0; i < found_n; i++) draw_note_row(ctx, found[i], &edit_target, &delete_target);
+        for (size_t i = 0; i < found_n; i++) draw_note_row(ctx, found[i], &delete_target);
         nk_group_end(ctx);
     }
-    if (edit_target) begin_edit(edit_target);
-    if (delete_target) notes_delete_note(notes_md_path, notes, delete_target->id);
+    if (delete_target) {
+        notes_delete_note(notes_md_path, notes, delete_target->id);
+        g_pending_delete_id[0] = '\0';
+    }
 
-    (void)window_width;
-
-    bool save_clicked, cancel_clicked;
-    draw_compose_box(ctx, true, &save_clicked, &cancel_clicked);
-    if (cancel_clicked) {
-        reset_compose();
-    } else if (save_clicked) {
-        if (g_compose_editing) {
-            notes_update_note(notes_md_path, notes, g_compose_editing_id,
-                               g_compose_has_line, g_compose_line, g_compose_body);
-        } else {
-            uint64_t h;
-            bool has_hash = file_content_hash(selected_path, &h);
-            notes_append_file_note(notes_md_path, notes, selected_path, has_hash, h,
-                                    g_compose_has_line, g_compose_line, g_compose_body);
-        }
-        reset_compose();
+    nk_layout_row_dynamic(ctx, add_button_h, 1);
+    if (nk_button_label(ctx, "+ Add note")) {
+        const char *p[1] = { selected_path };
+        note_compose_open_add(p, 1, false, 1);
     }
 }
 
 void ui_panel_draw(struct nk_context *ctx, int window_width, int window_height,
                     const char *selected_path, const char *selected_language,
                     const char **cluster_paths, size_t cluster_count,
-                    NoteSet *notes, const char *notes_md_path) {
+                    NoteSet *notes, const char *notes_md_path,
+                    PanelRect *out_bounds) {
     float w = (float)UI_PANEL_WIDTH;
-    /* This window's own scrollbar was previously suppressed
-     * (NK_WINDOW_NO_SCROLLBAR) because the content viewer's height was
-     * sized to exactly fill the window and nuklear's item spacing/padding
-     * pushed the laid-out content a few px past the window's rect, adding
-     * a redundant outer scrollbar alongside the edit box's own internal
-     * one for the *same* content. Now that the Notes section (list +
-     * compose box) sits below the viewer too, the window's total content
-     * can genuinely exceed its height for real (more notes than fit, a
-     * long note body, a short window) -- that's not redundant, it's the
-     * only way to reach controls below the fold, so the scrollbar stays
-     * on. */
-    if (nk_begin(ctx, "Inspector", nk_rect((float)window_width - w, 0, w, (float)window_height),
-                 NK_WINDOW_BORDER | NK_WINDOW_TITLE)) {
+    /* NK_WINDOW_MOVABLE|NK_WINDOW_SCALABLE: this rect is only honored the
+     * frame the window is first created (nuklear owns its position/size
+     * from then on, updated by the user's own drag/resize) -- see the
+     * plan notes on nk_begin_titled's behavior. So this is just a sane
+     * first-launch default, not a per-frame pin anymore. */
+    if (nk_begin(ctx, UI_PANEL_TITLE, nk_rect((float)window_width - w, 0, w, (float)window_height),
+                 NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
+                 NK_WINDOW_MINIMIZABLE)) {
+        struct nk_rect b = nk_window_get_bounds(ctx);
+        /* nk_window_get_bounds keeps reporting the *restored* size even
+         * while shaded/collapsed (double-click the header -- see main.c) --
+         * report just the header strip instead, so 3D interaction and
+         * label drawing correctly get the rest of the screen back. */
+        if (nk_window_is_collapsed(ctx, UI_PANEL_TITLE)) b.h = PANEL_HEADER_HEIGHT;
+        out_bounds->x = b.x;
+        out_bounds->y = b.y;
+        out_bounds->w = b.w;
+        out_bounds->h = b.h;
+
         if (cluster_count > 1) {
-            draw_group_mode(ctx, window_height, cluster_paths, cluster_count, notes, notes_md_path);
+            draw_group_mode(ctx, cluster_paths, cluster_count, notes, notes_md_path);
         } else {
-            draw_single_mode(ctx, window_width, window_height, selected_path, selected_language,
-                              notes, notes_md_path);
+            struct nk_vec2 size = nk_window_get_size(ctx);
+            draw_single_mode(ctx, size.y, selected_path, selected_language, notes, notes_md_path);
         }
+    } else {
+        out_bounds->x = out_bounds->y = out_bounds->w = out_bounds->h = 0.0f;
     }
     nk_end(ctx);
 }

@@ -32,6 +32,7 @@ add_executable(codemap-view
     render/gl_scene.c
     render/picking.c
     render/ui_panel.c
+    render/note_compose.c
     render/labels.c
 )
 target_include_directories(codemap-view PRIVATE
