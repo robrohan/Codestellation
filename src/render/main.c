@@ -28,6 +28,7 @@
 #include "note_compose.h"
 #include "properties_panel.h"
 #include "project_launcher.h"
+#include "tinyfiledialogs.h"
 #include "labels.h"
 #include "panel_rect.h"
 #include "../common/pathutil.h"
@@ -497,6 +498,7 @@ int main(int argc, char **argv) {
         }
 
         char *picked_dir = NULL;
+        bool export_notes_clicked = false;
         {
             const char *sel_path = selected >= 0 ? graph.nodes[selected].path : NULL;
             const char *sel_lang = selected >= 0 ? graph.nodes[selected].language : NULL;
@@ -510,9 +512,33 @@ int main(int argc, char **argv) {
             ui_panel_draw(ctx, width, height, sel_path, sel_lang, cluster_paths, cluster_count,
                           &notes, notes_path, &inspector_bounds);
             note_compose_draw(ctx, &notes, notes_path, &note_bounds);
-            picked_dir = properties_panel_draw(ctx, &show_origin, &properties_bounds);
+            picked_dir = properties_panel_draw(ctx, &show_origin, notes_path != NULL,
+                                                &export_notes_clicked, &properties_bounds);
             labels_draw(ctx, width, height, inspector_bounds, note_bounds, properties_bounds,
                         view_proj, positions, &graph, &notes);
+        }
+
+        if (export_notes_clicked && notes_path) {
+            /* graph.notes.md lives under Application Support, easy to
+             * lose track of -- tinyfd_saveFileDialog + a plain copy gets
+             * a copy somewhere the user will actually find it. */
+            const char *dest = tinyfd_saveFileDialog("Export Notes", "notes.md", 0, NULL, NULL);
+            if (dest) {
+                FILE *in = fopen(notes_path, "rb");
+                FILE *out = in ? fopen(dest, "wb") : NULL;
+                bool ok = false;
+                if (in && out) {
+                    char buf[8192];
+                    size_t n;
+                    ok = true;
+                    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+                        if (fwrite(buf, 1, n, out) != n) { ok = false; break; }
+                    }
+                }
+                if (in) fclose(in);
+                if (out) fclose(out);
+                if (!ok) tinyfd_messageBox("Codestellation", "Could not export notes.", "ok", "error", 1);
+            }
         }
 
         int fb_width, fb_height;

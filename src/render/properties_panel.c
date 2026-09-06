@@ -12,10 +12,13 @@
 #include "../common/pathutil.h"
 #include <stddef.h>
 
-char *properties_panel_draw(struct nk_context *ctx, int *show_origin, PanelRect *out_bounds) {
+char *properties_panel_draw(struct nk_context *ctx, int *show_origin, bool has_notes,
+                             bool *out_export_clicked, PanelRect *out_bounds) {
     char *picked = NULL;
+    *out_export_clicked = false;
 
-    if (nk_begin(ctx, PROPERTIES_PANEL_TITLE, nk_rect(20, 20, 260, 150),
+    float h = has_notes ? 180.0f : 150.0f;
+    if (nk_begin(ctx, PROPERTIES_PANEL_TITLE, nk_rect(20, 20, 260, h),
                  NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
                  NK_WINDOW_MINIMIZABLE)) {
         struct nk_rect b = nk_window_get_bounds(ctx);
@@ -36,6 +39,15 @@ char *properties_panel_draw(struct nk_context *ctx, int *show_origin, PanelRect 
 
         nk_layout_row_dynamic(ctx, 24, 1);
         nk_checkbox_label(ctx, "Show origin", show_origin);
+
+        /* Notes live under Application Support -- easy to lose track of,
+         * hence a direct way to get a copy somewhere you'll find it.
+         * Hidden entirely rather than shown disabled when there's nothing
+         * to export yet (no project loaded). */
+        if (has_notes) {
+            nk_layout_row_dynamic(ctx, 26, 1);
+            if (nk_button_label(ctx, "Export Notes...")) *out_export_clicked = true;
+        }
     } else {
         out_bounds->x = out_bounds->y = out_bounds->w = out_bounds->h = 0.0f;
     }
