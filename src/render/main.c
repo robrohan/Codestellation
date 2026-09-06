@@ -22,6 +22,7 @@
 #include "camera.h"
 #include "layout3d.h"
 #include "gl_scene.h"
+#include "dircolor.h"
 #include "picking.h"
 #include "ui_panel.h"
 #include "note_compose.h"
@@ -132,6 +133,11 @@ int main(int argc, char **argv) {
     Vec3 *positions = (Vec3 *)malloc(graph.node_count * sizeof(Vec3));
     layout3d_compute(&graph, positions, 300);
 
+    /* Static per-node color (directory-derived) -- computed once here,
+     * never touched again (unlike positions, no per-drag update path). */
+    float *colors = (float *)malloc(graph.node_count * 3 * sizeof(float));
+    dircolor_compute(&graph, colors);
+
     /* Overlay any manually-dragged positions on top of the fresh layout.
      * A hash mismatch (the file changed since the position was saved) is
      * advisory, not blocking -- the position still applies. */
@@ -188,7 +194,7 @@ int main(int argc, char **argv) {
 
     GLScene scene;
     gl_scene_init(&scene);
-    gl_scene_upload(&scene, (const float *)positions, graph.node_count, edge_indices, graph.edge_count);
+    gl_scene_upload(&scene, (const float *)positions, colors, graph.node_count, edge_indices, graph.edge_count);
 
     Camera camera;
     camera_init(&camera);
@@ -471,6 +477,7 @@ int main(int argc, char **argv) {
     glfwTerminate();
 
     free(positions);
+    free(colors);
     free(edge_indices);
     graph_free(&graph);
     overlay_free(&overlay);

@@ -29,6 +29,8 @@ add_executable(codemap-view
     render/main.c
     render/camera.c
     render/layout3d.c
+    render/dirgroup.c
+    render/dircolor.c
     render/gl_scene.c
     render/picking.c
     render/ui_panel.c

@@ -10,17 +10,28 @@
 static const char *VERT_SRC =
     "#version 330 core\n"
     "layout(location = 0) in vec3 a_pos;\n"
+    "layout(location = 1) in vec3 a_color;\n"
     "uniform mat4 u_mvp;\n"
+    "out vec3 v_color;\n"
     "void main() {\n"
     "    gl_Position = u_mvp * vec4(a_pos, 1.0);\n"
     "    gl_PointSize = 9.0;\n"
+    "    v_color = a_color;\n"
     "}\n";
 
 static const char *FRAG_SRC =
     "#version 330 core\n"
+    "in vec3 v_color;\n"
     "uniform vec4 u_color;\n"
+    /* Everything except the base per-vertex-colored point pass (edges,
+     * the highlight/cluster accent passes, the axis gizmo) wants a flat
+     * override color instead of whatever's sitting in a_color/v_color --
+     * the axis VAO doesn't even have a color attribute bound, so a_color
+     * there is just the GL default (0,0,0), irrelevant since those draws
+     * always set u_override. */
+    "uniform int u_override;\n"
     "out vec4 frag_color;\n"
-    "void main() { frag_color = u_color; }\n";
+    "void main() { frag_color = (u_override != 0) ? u_color : vec4(v_color, 1.0); }\n";
 
 static GLuint compile_shader(GLenum type, const char *src) {
     GLuint shader = glCreateShader(type);
@@ -59,9 +70,11 @@ void gl_scene_init(GLScene *scene) {
     scene->prog = link_program();
     scene->u_mvp = glGetUniformLocation(scene->prog, "u_mvp");
     scene->u_color = glGetUniformLocation(scene->prog, "u_color");
+    scene->u_override = glGetUniformLocation(scene->prog, "u_override");
 
     glGenVertexArrays(1, &scene->vao);
     glGenBuffers(1, &scene->vbo);
+    glGenBuffers(1, &scene->color_vbo);
     glGenBuffers(1, &scene->ebo);
     glGenBuffers(1, &scene->highlight_ebo);
     glGenBuffers(1, &scene->cluster_ebo);
@@ -70,6 +83,13 @@ void gl_scene_init(GLScene *scene) {
     glBindBuffer(GL_ARRAY_BUFFER, scene->vbo);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
     glEnableVertexAttribArray(0);
+    /* Separate buffer rather than interleaving into vbo above: colors are
+     * static per node (never touched by dragging), so gl_scene_update_positions'
+     * existing partial-buffer update (position only) doesn't need to
+     * become stride-aware. */
+    glBindBuffer(GL_ARRAY_BUFFER, scene->color_vbo);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+    glEnableVertexAttribArray(1);
     /* The element-buffer binding is part of VAO state (unlike GL_ARRAY_BUFFER),
      * so it has to be bound here, while this VAO is current -- binding it later
      * in gl_scene_upload (with no VAO bound) would attach it to VAO 0 instead,
@@ -97,13 +117,16 @@ void gl_scene_init(GLScene *scene) {
     glBindVertexArray(0);
 }
 
-void gl_scene_upload(GLScene *scene, const float *positions, size_t point_count,
+void gl_scene_upload(GLScene *scene, const float *positions, const float *colors, size_t point_count,
                       const unsigned int *edge_indices, size_t edge_count) {
     scene->point_count = (GLsizei)point_count;
     scene->edge_index_count = (GLsizei)(edge_count * 2);
 
     glBindBuffer(GL_ARRAY_BUFFER, scene->vbo);
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(point_count * 3 * sizeof(float)), positions, GL_DYNAMIC_DRAW);
+
+    glBindBuffer(GL_ARRAY_BUFFER, scene->color_vbo);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(point_count * 3 * sizeof(float)), colors, GL_STATIC_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, scene->ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(edge_count * 2 * sizeof(unsigned int)), edge_indices, GL_STATIC_DRAW);
@@ -131,6 +154,11 @@ void gl_scene_draw(const GLScene *scene, const float *mvp, int highlight_index) 
     glUniformMatrix4fv(scene->u_mvp, 1, GL_FALSE, mvp);
     glBindVertexArray(scene->vao);
 
+    /* Everything here except the base points pass wants a flat override
+     * color rather than each vertex's own directory color -- see
+     * FRAG_SRC's comment. */
+    glUniform1i(scene->u_override, 1);
+
     /* No blending is enabled anywhere in this renderer, so "fade" is done
      * by dimming the RGB itself rather than via alpha -- simpler than
      * introducing blend-state management for one effect. */
@@ -149,8 +177,11 @@ void gl_scene_draw(const GLScene *scene, const float *mvp, int highlight_index) 
         glDrawElements(GL_LINES, scene->highlight_index_count, GL_UNSIGNED_INT, 0);
     }
 
-    glUniform4f(scene->u_color, 1.0f, 0.82f, 0.25f, 1.0f);
+    /* Base points: each node's own directory color, from gl_scene_upload's
+     * color_vbo, not a flat uniform. */
+    glUniform1i(scene->u_override, 0);
     glDrawArrays(GL_POINTS, 0, scene->point_count);
+    glUniform1i(scene->u_override, 1);
 
     if (highlight_index >= 0 && highlight_index < scene->point_count) {
         glUniform4f(scene->u_color, 1.0f, 0.35f, 0.35f, 1.0f);
@@ -175,6 +206,9 @@ void gl_scene_draw_axis(const GLScene *scene, const float *mvp, float length) {
 
     glUseProgram(scene->prog);
     glUniformMatrix4fv(scene->u_mvp, 1, GL_FALSE, mvp);
+    /* axis_vao has no color attribute bound at all (only position), so
+     * this must always read the flat u_color, never a_color/v_color. */
+    glUniform1i(scene->u_override, 1);
     glBindVertexArray(scene->axis_vao);
     glBindBuffer(GL_ARRAY_BUFFER, scene->axis_vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
@@ -192,6 +226,7 @@ void gl_scene_draw_axis(const GLScene *scene, const float *mvp, float length) {
 void gl_scene_destroy(GLScene *scene) {
     glDeleteProgram(scene->prog);
     glDeleteBuffers(1, &scene->vbo);
+    glDeleteBuffers(1, &scene->color_vbo);
     glDeleteBuffers(1, &scene->ebo);
     glDeleteBuffers(1, &scene->highlight_ebo);
     glDeleteBuffers(1, &scene->cluster_ebo);
