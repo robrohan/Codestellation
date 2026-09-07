@@ -1,0 +1,96 @@
+name: build
+
+"on":
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build (${{ matrix.artifact }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: codestellation-linux-x64
+          - os: macos-latest
+            artifact: codestellation-macos-arm64
+          - os: windows-latest
+            artifact: codestellation-windows-x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # GLFW's X11 backend needs the Xorg dev headers on Linux; Wayland is
+      # switched off so its dev packages aren't required too. macOS and
+      # Windows runners already have everything (Cocoa / Win32 + a system
+      # CMake and toolchain).
+      - name: Install Linux GUI deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xorg-dev libgl1-mesa-dev
+
+      # Every runner has CMake. On Windows the default generator is the
+      # multi-config Visual Studio one (Release chosen at build time,
+      # output nested under a <Config>/ dir) -- hence --config on the
+      # build step and the dynamic binary lookup in bash below rather than
+      # a hardcoded path. First configure also clones tree-sitter + the
+      # per-language grammars + GLFW via FetchContent (the C# grammar's
+      # generated parser is large, so it takes a bit).
+      - name: Configure
+        shell: bash
+        run: |
+          args=(-S . -B build -DCMAKE_BUILD_TYPE=Release)
+          [ "$RUNNER_OS" = "Linux" ] && args+=(-DGLFW_BUILD_WAYLAND=OFF)
+          cmake "${args[@]}"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      # codemap-view needs a real GPU/display to open a window, which no
+      # runner has, so it's only verified to build + link. codemap-build
+      # is headless and gets exercised for real against every language's
+      # fixtures plus a mixed-language walk. `set -e` + an explicit
+      # exit-code check means a failed run actually goes red (bash is
+      # available on all three runners, so one script covers every OS).
+      - name: Smoke-test codemap-build against all fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe=$(find build -type f \( -name codemap-build -o -name codemap-build.exe \) | head -n1)
+          [ -n "$exe" ] || { echo "codemap-build not found in build output"; exit 1; }
+          echo "using: $exe"
+          run_fixture() {
+            "$exe" --root "$1" --out "$2"
+            [ -f "$2" ] || { echo "$2 was not created for root '$1'"; exit 1; }
+            cat "$2"
+          }
+          run_fixture test/fixtures/c      graph-c.json
+          run_fixture test/fixtures/csharp graph-csharp.json
+          run_fixture test/fixtures/lisp   graph-lisp.json
+          run_fixture test/fixtures/python graph-python.json
+          run_fixture test/fixtures/go     graph-go.json
+          run_fixture test/fixtures        graph-mixed.json
+
+      - name: Collect binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for name in codemap-build codemap-view; do
+            f=$(find build -type f \( -name "$name" -o -name "$name.exe" \) | head -n1)
+            [ -n "$f" ] || { echo "$name not found in build output"; exit 1; }
+            cp "$f" dist/
+          done
+          cp README.md LICENSE dist/
+          ls -la dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/
+          if-no-files-found: error
