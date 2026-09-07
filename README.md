@@ -34,6 +34,36 @@ should work (a GL loader and the directory-walk code both have
 non-Apple branches) but hasn't been run on real hardware in this
 environment -- see the Phase 7 commit message for specifics.
 
+### Xcode project
+
+```
+cmake -G Xcode -B build-xcode -S .
+open build-xcode/Codestellation.xcodeproj
+```
+
+`build-xcode/` is gitignored. Xcode is a multi-config generator, so
+don't pass `-DCMAKE_BUILD_TYPE` -- pick the configuration in Xcode, or
+build from the CLI with `cmake --build build-xcode --config Debug`.
+Editing `CMakeLists.txt` re-runs CMake automatically on the next build
+via the generated `ZERO_CHECK` target.
+
+This produces an ad-hoc-signed `codemap-view.app` (with `codemap-build`
+embedded next to its executable) that runs straight from Xcode's Run
+button. Hardened runtime is deliberately off here: with it on, Xcode's
+injected `DYLD_*` environment makes dyld kill the fresh process that
+Properties > Open spawns via `execv`.
+
+For a Developer-ID-signed, hardened-runtime `.app` to hand to another
+Mac:
+
+```
+cmake -G Xcode -B build-xcode -S . -DCODESTELLATION_DIST=ON
+cmake --build build-xcode --config Release
+```
+
+Don't Run that build from Xcode -- launch the built `.app` directly
+(Finder or `open`), where no `DYLD_*` injection happens.
+
 ## Run
 
 ```
