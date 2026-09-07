@@ -80,7 +80,9 @@ const char *path_extension(const char *path) {
     return dot ? dot : "";
 }
 
-static const char *SKIP_DIRS[] = { ".git", "bin", "obj", "build", "node_modules", NULL };
+static const char *SKIP_DIRS[] = { ".git", "bin", "obj", "build", "node_modules",
+                                   "__pycache__", ".venv", "venv", ".tox", ".mypy_cache",
+                                   "vendor", NULL };
 
 static bool should_skip_dir(const char *name) {
     for (int i = 0; SKIP_DIRS[i]; i++) {

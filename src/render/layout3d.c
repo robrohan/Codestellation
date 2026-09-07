@@ -2,6 +2,7 @@
 #include "dirgroup.h"
 #include "../common/pathutil.h"
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 static uint64_t fnv1a(const char *s) {
@@ -80,6 +81,18 @@ void layout3d_compute(const Graph *g, Vec3 *out_positions, int iterations) {
         return;
     }
 
+    /* Repulsion is O(n^2) per iteration. Below ~1500 nodes the full 300
+     * iterations are cheap; past that, scale the count down (never below
+     * 60, which is enough for the seeded layout to settle) so a
+     * few-thousand-node graph loads in seconds instead of a minute. The
+     * proper fix is a Barnes-Hut approximation of the repulsion pass --
+     * this is the stopgap until then. */
+    int effective_iters = iterations;
+    if (n > 1500) {
+        effective_iters = (int)((long)iterations * 1500 / (long)n);
+        if (effective_iters < 60) effective_iters = 60;
+    }
+
     Vec3 *disp = (Vec3 *)malloc(n * sizeof(Vec3));
     float k = 2.2f; /* ideal edge length */
     float temperature = 3.0f;
@@ -106,19 +119,25 @@ void layout3d_compute(const Graph *g, Vec3 *out_positions, int iterations) {
      * pull toward it). */
     const float dir_cluster_strength = 4.0f;
 
-    for (int iter = 0; iter < iterations; iter++) {
+    int progress_step = effective_iters > 10 ? effective_iters / 10 : 1;
+    for (int iter = 0; iter < effective_iters; iter++) {
+        if (n > 1500 && iter % progress_step == 0) {
+            fprintf(stderr, "layout: %d/%d iterations (%zu nodes)\n", iter, effective_iters, n);
+        }
         for (size_t i = 0; i < n; i++) disp[i] = (Vec3){ 0, 0, 0 };
 
-        /* Repulsion, all pairs. */
+        /* Repulsion, all pairs. The displacement contribution is
+         * dir * force = (delta/dist) * (k*k/dist) = delta * (k*k / dist^2),
+         * so this works entirely in squared distance -- no sqrt in the
+         * hottest loop in the program. */
         for (size_t i = 0; i < n; i++) {
             for (size_t j = i + 1; j < n; j++) {
                 Vec3 delta = vec3_sub(out_positions[i], out_positions[j]);
-                float dist = vec3_length(delta);
-                if (dist < 0.01f) dist = 0.01f;
-                float force = (k * k) / dist;
-                Vec3 dir = vec3_scale(delta, 1.0f / dist);
-                disp[i] = vec3_add(disp[i], vec3_scale(dir, force));
-                disp[j] = vec3_sub(disp[j], vec3_scale(dir, force));
+                float d2 = vec3_dot(delta, delta);
+                if (d2 < 0.0001f) d2 = 0.0001f;
+                Vec3 f = vec3_scale(delta, (k * k) / d2);
+                disp[i] = vec3_add(disp[i], f);
+                disp[j] = vec3_sub(disp[j], f);
             }
         }
 

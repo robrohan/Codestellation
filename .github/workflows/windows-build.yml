@@ -53,6 +53,8 @@ jobs:
           Run-Fixture "test\fixtures\c" "graph-c.json"
           Run-Fixture "test\fixtures\csharp" "graph-csharp.json"
           Run-Fixture "test\fixtures\lisp" "graph-lisp.json"
+          Run-Fixture "test\fixtures\python" "graph-python.json"
+          Run-Fixture "test\fixtures\go" "graph-go.json"
           Run-Fixture "test\fixtures" "graph-mixed.json"
 
       - name: Confirm codemap-view.exe was built

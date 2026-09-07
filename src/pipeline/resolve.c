@@ -30,6 +30,20 @@ static void ref_sink(void *ctx_, const RefFact *fact) {
     reflist_add((RefList *)ctx_, fact);
 }
 
+/* An import listed twice (`import pkg.mod` then `from pkg.mod import x`),
+ * or two references that resolve to the same target, should be one edge,
+ * not several stacked on top of each other. Cheap linear scan -- the
+ * per-file reference count this runs against is small. */
+static bool edge_exists(const Graph *g, int source, int target, const char *kind) {
+    for (size_t e = 0; e < g->edge_count; e++) {
+        if (g->edges[e].source == source && g->edges[e].target == target &&
+            strcmp(g->edges[e].kind, kind) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static const char *kind_label(RefKind k) {
     switch (k) {
         case REF_TYPE_NAME:    return "type_reference";
@@ -79,7 +93,10 @@ bool resolve_build_graph(const ParsedFileList *files, Graph *out_graph, int *out
                 int target_id = symtab_get(table, candidate);
                 if (target_id >= 0) {
                     if (target_id != (int)i) {
-                        graph_add_edge(out_graph, (int)i, target_id, kind_label(ref->kind));
+                        const char *label = kind_label(ref->kind);
+                        if (!edge_exists(out_graph, (int)i, target_id, label)) {
+                            graph_add_edge(out_graph, (int)i, target_id, label);
+                        }
                     }
                 } else {
                     unresolved++;

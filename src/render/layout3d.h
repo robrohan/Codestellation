@@ -8,8 +8,9 @@
  * g->node_count entries): seeds each node near others in the same
  * directory (so the initial state roughly tracks the file tree), then
  * relaxes with a 3D Fruchterman-Reingold spring embedder. Naive O(n^2)
- * repulsion -- fine at load time for hundreds-to-low-thousands of nodes;
- * a Barnes-Hut approximation would be the scale-up path, not needed yet. */
+ * repulsion; past ~1500 nodes the `iterations` count is scaled down
+ * internally to keep load time in seconds (a Barnes-Hut approximation is
+ * the real scale-up path). */
 void layout3d_compute(const Graph *g, Vec3 *out_positions, int iterations);
 
 /* Max distance from the origin across all positions -- used to pick an
