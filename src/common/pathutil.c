@@ -53,8 +53,10 @@ char *path_dirname(const char *path) {
 
 char *path_normalize(const char *path) {
 #ifdef _WIN32
-    char buf[MAX_PATH];
-    if (_fullpath(buf, path, MAX_PATH) == NULL) return NULL;
+    /* Not MAX_PATH (260) -- real source trees, especially vendored C/C++
+     * header forests, blow past that and _fullpath would just fail. */
+    char buf[4096];
+    if (_fullpath(buf, path, sizeof(buf)) == NULL) return NULL;
     struct stat st;
     if (stat(buf, &st) != 0) return NULL;
     return xstrdup(buf);
@@ -94,7 +96,7 @@ static bool should_skip_dir(const char *name) {
 #ifdef _WIN32
 
 void walk_directory(const char *root, WalkFileFn fn, void *ctx) {
-    char pattern[MAX_PATH];
+    char pattern[4096]; /* not MAX_PATH -- deep trees exceed 260 */
     snprintf(pattern, sizeof(pattern), "%s\\*", root);
     WIN32_FIND_DATAA fd;
     HANDLE h = FindFirstFileA(pattern, &fd);

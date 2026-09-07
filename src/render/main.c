@@ -40,6 +40,10 @@
 
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
+#elif defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
 #endif
 
 #include <stdio.h>
@@ -132,6 +136,13 @@ static char *resolve_self_exe_path(const char *argv0) {
     char buf[4096];
     uint32_t size = sizeof(buf);
     if (_NSGetExecutablePath(buf, &size) == 0) {
+        char *resolved = path_normalize(buf);
+        return resolved ? resolved : xstrdup(buf);
+    }
+#elif defined(_WIN32)
+    char buf[4096];
+    DWORD n = GetModuleFileNameA(NULL, buf, sizeof(buf));
+    if (n > 0 && n < sizeof(buf)) {
         char *resolved = path_normalize(buf);
         return resolved ? resolved : xstrdup(buf);
     }

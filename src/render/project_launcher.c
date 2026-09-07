@@ -21,7 +21,6 @@
 #if defined(_WIN32)
 #include <direct.h>
 #include <process.h>
-#define execv _execv
 #else
 #include <unistd.h>
 #include <sys/wait.h>
@@ -68,11 +67,13 @@ static bool mkdir_p(const char *path) {
     return ok;
 }
 
+#if !defined(_WIN32)
 /* Wraps s in single quotes for a POSIX shell command line, escaping any
  * embedded ' as the standard '\'' trick (end quote, literal escaped
- * quote, resume quoting). Not attempting general Windows cmd.exe
- * quoting here -- unverified on Windows, matching this project's
- * existing stance on other platform-specific paths. */
+ * quote, resume quoting). Windows doesn't use this at all -- it spawns
+ * codemap-build directly via _spawnv (no shell, no quoting), since
+ * cmd.exe doesn't understand '...' quoting and mangled the paths into
+ * "The filename, directory name, or volume label syntax is incorrect". */
 static char *shell_quote(const char *s) {
     size_t len = strlen(s);
     char *out = (char *)malloc(len * 4 + 3);
@@ -92,6 +93,7 @@ static char *shell_quote(const char *s) {
     out[o] = '\0';
     return out;
 }
+#endif /* !_WIN32 */
 
 static void show_error(const char *message) {
     tinyfd_messageBox("Codestellation", message, "ok", "error", 1);
@@ -119,8 +121,12 @@ void project_launcher_build_and_relaunch(const char *self_exe_path, const char *
     snprintf(hash8, sizeof(hash8), "%08llx", (unsigned long long)(h & 0xFFFFFFFFULL));
 
     const char *home = getenv("HOME");
+#if defined(_WIN32)
+    if (!home) home = getenv("USERPROFILE"); /* Windows rarely sets HOME */
+#endif
     if (!home) {
-        show_error("Could not determine your home directory (no HOME environment variable).");
+        show_error("Could not determine your home directory "
+                   "(no HOME or USERPROFILE environment variable).");
         free(root);
         return;
     }
@@ -141,9 +147,24 @@ void project_launcher_build_and_relaunch(const char *self_exe_path, const char *
     snprintf(graph_json_path, sizeof(graph_json_path), "%s/graph.json", project_dir);
 
     char *exe_dir = path_dirname(self_exe_path);
+#if defined(_WIN32)
+    char *codemap_build_path = path_join(exe_dir, "codemap-build.exe");
+#else
     char *codemap_build_path = path_join(exe_dir, "codemap-build");
+#endif
     free(exe_dir);
 
+#if defined(_WIN32)
+    /* Straight to _spawnv -- no shell, so Windows paths (drive letters,
+     * spaces) need no quoting. system() here would run cmd.exe, which
+     * doesn't understand the POSIX '...' quoting and reported
+     * "The filename, directory name, or volume label syntax is
+     * incorrect" on every Open. */
+    const char *argv_build[] = { codemap_build_path, "--root", root, "--out", graph_json_path, NULL };
+    intptr_t rc = _spawnv(_P_WAIT, codemap_build_path, (const char *const *)argv_build);
+    free(codemap_build_path);
+    bool build_ok = (rc == 0);
+#else
     char *q_build = shell_quote(codemap_build_path);
     char *q_root = shell_quote(root);
     char *q_out = shell_quote(graph_json_path);
@@ -159,9 +180,6 @@ void project_launcher_build_and_relaunch(const char *self_exe_path, const char *
     free(cmd);
     free(codemap_build_path);
 
-#if defined(_WIN32)
-    bool build_ok = (rc == 0);
-#else
     bool build_ok = WIFEXITED(rc) && WEXITSTATUS(rc) == 0;
 #endif
 
@@ -180,8 +198,17 @@ void project_launcher_build_and_relaunch(const char *self_exe_path, const char *
      * than leaving GL/window state to be reclaimed mid-transition. */
     glfwTerminate();
     char *argv_new[3] = { (char *)self_exe_path, graph_json_path, NULL };
+#if defined(_WIN32)
+    /* _execv on Windows is emulated -- it doesn't replace the process
+     * image, and the handoff is unreliable for a GUI process. Spawn a
+     * detached copy and exit this one instead. */
+    if (_spawnv(_P_NOWAIT, self_exe_path, (const char *const *)argv_new) != -1) {
+        exit(0);
+    }
+#else
     execv(self_exe_path, argv_new);
+#endif
 
-    /* Only reached if execv itself failed to launch at all. */
+    /* Only reached if the relaunch failed to start at all. */
     fprintf(stderr, "error: failed to relaunch %s\n", self_exe_path);
 }
