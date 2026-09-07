@@ -2,6 +2,8 @@
 #include "c/c_adapter.h"
 #include "csharp/csharp_adapter.h"
 #include "lisp/lisp_adapter.h"
+#include "python/python_adapter.h"
+#include "go/go_adapter.h"
 #include <string.h>
 
 #define MAX_ADAPTERS 16
@@ -14,6 +16,8 @@ void adapter_registry_init(void) {
     g_adapters[g_adapter_count++] = c_adapter_get();
     g_adapters[g_adapter_count++] = csharp_adapter_get();
     g_adapters[g_adapter_count++] = lisp_adapter_get();
+    g_adapters[g_adapter_count++] = python_adapter_get();
+    g_adapters[g_adapter_count++] = go_adapter_get();
 }
 
 const LanguageAdapter *adapter_for_extension(const char *ext) {

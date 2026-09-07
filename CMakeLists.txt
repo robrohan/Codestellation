@@ -73,6 +73,35 @@ if(EXISTS ${ts_lisp_SOURCE_DIR}/src/scanner.c)
 endif()
 target_include_directories(tree_sitter_lisp PUBLIC ${ts_lisp_SOURCE_DIR}/src)
 
+# --- tree-sitter-python grammar (Python adapter) ------------------------
+# Generated parser.c + a small external scanner. Shallow clone pinned to a
+# tag, same as the others.
+FetchContent_Declare(ts_python
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-python
+    GIT_TAG v0.23.6
+    GIT_SHALLOW TRUE
+)
+FetchContent_Populate(ts_python)
+add_library(tree_sitter_python STATIC ${ts_python_SOURCE_DIR}/src/parser.c)
+if(EXISTS ${ts_python_SOURCE_DIR}/src/scanner.c)
+    target_sources(tree_sitter_python PRIVATE ${ts_python_SOURCE_DIR}/src/scanner.c)
+endif()
+target_include_directories(tree_sitter_python PUBLIC ${ts_python_SOURCE_DIR}/src)
+
+# --- tree-sitter-go grammar (Go adapter) -------------------------------
+# Generated parser.c, no external scanner. Shallow clone pinned to a tag.
+FetchContent_Declare(ts_go
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-go
+    GIT_TAG v0.23.4
+    GIT_SHALLOW TRUE
+)
+FetchContent_Populate(ts_go)
+add_library(tree_sitter_go STATIC ${ts_go_SOURCE_DIR}/src/parser.c)
+if(EXISTS ${ts_go_SOURCE_DIR}/src/scanner.c)
+    target_sources(tree_sitter_go PRIVATE ${ts_go_SOURCE_DIR}/src/scanner.c)
+endif()
+target_include_directories(tree_sitter_go PUBLIC ${ts_go_SOURCE_DIR}/src)
+
 # --- GLFW (window/input/GL context, cross-platform) ----------------------
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)

@@ -18,9 +18,19 @@ struct nk_context;
  * user has dragged/resized either to) are skipped rather than drawn
  * underneath -- pass a rect's w as 0 for "that pane isn't open, nothing to
  * avoid". A node with at least one note (file or group) gets a small
- * amber dot next to its label. */
+ * amber dot next to its label.
+ *
+ * At most LABELS_MAX_VISIBLE labels are drawn per frame, the nearest to
+ * the camera winning -- otherwise a few-thousand-node graph both buries
+ * the view in unreadable text and overflows Nuklear's vertex buffer
+ * (which silently truncates *everything* in that draw, panels included).
+ * `selected` (or -1) is always labelled regardless of that cap, as is any
+ * noted node. */
 void labels_draw(struct nk_context *ctx, int window_width, int window_height,
                   PanelRect inspector_bounds, PanelRect note_bounds, PanelRect properties_bounds,
-                  const float *view_proj, const Vec3 *positions, const Graph *g, const NoteSet *notes);
+                  const float *view_proj, const Vec3 *positions, const Graph *g, const NoteSet *notes,
+                  int selected);
+
+#define LABELS_MAX_VISIBLE 200
 
 #endif

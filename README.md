@@ -15,10 +15,19 @@ Two binaries:
 
 Currently supported languages: **C** (`.c`/`.h`, `#include`-based),
 **C#** (`.cs`, namespace/type declarations + `using`-qualified
-references), **Lisp** (`.lisp`/`.lsp`/`.cl` -- a Common Lisp stand-in;
-see the header comment in `src/lang/lisp/lisp_adapter.c` before trusting
-it on a real codebase, the actual dialect wasn't confirmed when this was
-written).
+references), **Python** (`.py`/`.pyi`, `import` / `from ... import`,
+including relative imports), **Go** (`.go`, `import` paths resolved to
+packages by directory), **Lisp** (`.lisp`/`.lsp`/`.cl` -- a Common Lisp
+stand-in; see the header comment in `src/lang/lisp/lisp_adapter.c`
+before trusting it on a real codebase, the actual dialect wasn't
+confirmed when this was written).
+
+Python and Go have no in-source module identity -- `pkg.sub.mod` /
+`example.com/m/pkg` come from where a file sits relative to a source
+root (or `go.mod`) the adapter never sees -- so their dependency
+resolution is a documented best-guess (path-suffix matching, plus
+on-disk lookup for Python relative imports). See the header comments in
+`src/lang/python/python_adapter.c` and `src/lang/go/go_adapter.c`.
 
 ## Build
 
@@ -33,6 +42,36 @@ large, so that step takes a bit). Verified on macOS; Windows/Linux
 should work (a GL loader and the directory-walk code both have
 non-Apple branches) but hasn't been run on real hardware in this
 environment -- see the Phase 7 commit message for specifics.
+
+### Xcode project
+
+```
+cmake -G Xcode -B build-xcode -S .
+open build-xcode/Codestellation.xcodeproj
+```
+
+`build-xcode/` is gitignored. Xcode is a multi-config generator, so
+don't pass `-DCMAKE_BUILD_TYPE` -- pick the configuration in Xcode, or
+build from the CLI with `cmake --build build-xcode --config Debug`.
+Editing `CMakeLists.txt` re-runs CMake automatically on the next build
+via the generated `ZERO_CHECK` target.
+
+This produces an ad-hoc-signed `codemap-view.app` (with `codemap-build`
+embedded next to its executable) that runs straight from Xcode's Run
+button. Hardened runtime is deliberately off here: with it on, Xcode's
+injected `DYLD_*` environment makes dyld kill the fresh process that
+Properties > Open spawns via `execv`.
+
+For a Developer-ID-signed, hardened-runtime `.app` to hand to another
+Mac:
+
+```
+cmake -G Xcode -B build-xcode -S . -DCODESTELLATION_DIST=ON
+cmake --build build-xcode --config Release
+```
+
+Don't Run that build from Xcode -- launch the built `.app` directly
+(Finder or `open`), where no `DYLD_*` injection happens.
 
 ## Run
 
@@ -73,10 +112,16 @@ Every language plugs into `src/lang/adapter.h`'s `LanguageAdapter`
 struct -- the pipeline (`src/pipeline/*.c`) never references a specific
 language by name, only through that interface. To add one: pick a
 tree-sitter grammar, fetch it in the top-level `CMakeLists.txt`
-(mirroring the existing `ts_c`/`ts_csharp`/`ts_lisp` blocks), and write
-an adapter implementing `extract_declarations`/`extract_references`/
-`resolve_reference`. `src/lang/c/c_adapter.c` is the simplest example
-(no symbol table, path-based deps); `src/lang/csharp/csharp_adapter.c`
-shows scoped namespace/type resolution by walking the parse tree
-directly rather than a flat query; `src/lang/lisp/lisp_adapter.c` shows
-adapting to a grammar with no dialect-specific node types at all.
+(mirroring the existing `ts_c`/`ts_csharp`/`ts_lisp`/`ts_python`/`ts_go`
+blocks), add the adapter `.c` and its `tree_sitter_*` library to
+`src/CMakeLists.txt`'s `codemap-build` target, register it in
+`src/lang/registry.c`, and write an adapter implementing
+`extract_declarations`/`extract_references`/`resolve_reference`.
+`src/lang/c/c_adapter.c` is the simplest example (no symbol table,
+path-based deps, flat query); `src/lang/csharp/csharp_adapter.c` shows
+scoped namespace/type resolution by walking the parse tree directly
+rather than a flat query; `src/lang/python/python_adapter.c` and
+`src/lang/go/go_adapter.c` show path-derived module identity matched by
+suffix (Python also resolves relative imports against the filesystem);
+`src/lang/lisp/lisp_adapter.c` shows adapting to a grammar with no
+dialect-specific node types at all.

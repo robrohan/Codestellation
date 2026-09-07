@@ -48,8 +48,12 @@
 #include <math.h>
 #include <stdint.h>
 
-#define MAX_VERTEX_BUFFER (512 * 1024)
-#define MAX_ELEMENT_BUFFER (128 * 1024)
+/* Sized for the label overlay's worst case: LABELS_MAX_VISIBLE text
+ * labels plus the panels, all converted into this one buffer per frame.
+ * Nuklear silently truncates the *whole* draw (panels included) when
+ * nk_convert overflows, which looked like garbled/half-drawn panels. */
+#define MAX_VERTEX_BUFFER (4 * 1024 * 1024)
+#define MAX_ELEMENT_BUFFER (1024 * 1024)
 #define PICK_RADIUS_PX 10.0f
 #define AXIS_LENGTH 4.0f
 
@@ -515,7 +519,7 @@ int main(int argc, char **argv) {
             picked_dir = properties_panel_draw(ctx, &show_origin, notes_path != NULL,
                                                 &export_notes_clicked, &properties_bounds);
             labels_draw(ctx, width, height, inspector_bounds, note_bounds, properties_bounds,
-                        view_proj, positions, &graph, &notes);
+                        view_proj, positions, &graph, &notes, selected);
         }
 
         if (export_notes_clicked && notes_path) {
