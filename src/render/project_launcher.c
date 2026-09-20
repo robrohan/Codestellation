@@ -24,6 +24,8 @@
 #else
 #include <unistd.h>
 #include <sys/wait.h>
+#include <spawn.h>
+extern char **environ;
 #endif
 
 static uint64_t fnv1a(const char *s) {
@@ -193,9 +195,23 @@ void project_launcher_build_and_relaunch(const char *self_exe_path, const char *
 
     free(root);
 
-    /* Process-replace rather than a full quit/relaunch cycle -- see
-     * project_launcher.h. glfwTerminate first for a clean handoff rather
-     * than leaving GL/window state to be reclaimed mid-transition. */
+    /* Spawn a fresh, independent process rather than execv()-replacing
+     * this one's image in place. execv() looked like the natural "hand
+     * off and disappear" primitive (same pid, no fork bookkeeping), but
+     * it's fragile the moment anything is watching that specific pid --
+     * most notably a debugger. Running this under Xcode's Run button
+     * (LLDB attached via debugserver), execve() invalidated the task
+     * Xcode had attached to and the kernel killed the process outright:
+     * "Unable to obtain a task name port right for pid ...", "Debug
+     * session ended with code 9: killed" -- confirmed directly against a
+     * real session, not theoretical. posix_spawn() sidesteps this
+     * entirely: the replacement is a genuinely new pid, so a debugger
+     * attached to this one just sees it exit(0) normally, same as the
+     * _WIN32 branch already has to do below for its own, differently
+     * caused reason (see its comment) -- both platforms end up at
+     * "spawn a detached copy, exit this one" for that reason.
+     * glfwTerminate first for a clean handoff rather than leaving GL/
+     * window state to be reclaimed mid-transition. */
     glfwTerminate();
     char *argv_new[3] = { (char *)self_exe_path, graph_json_path, NULL };
 #if defined(_WIN32)
@@ -206,7 +222,10 @@ void project_launcher_build_and_relaunch(const char *self_exe_path, const char *
         exit(0);
     }
 #else
-    execv(self_exe_path, argv_new);
+    pid_t child_pid;
+    if (posix_spawn(&child_pid, self_exe_path, NULL, NULL, argv_new, environ) == 0) {
+        exit(0);
+    }
 #endif
 
     /* Only reached if the relaunch failed to start at all. */

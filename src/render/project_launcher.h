@@ -4,10 +4,11 @@
 /* Resolves `picked_dir` (an absolute, existing directory -- e.g. straight
  * from tinyfd_selectFolderDialog) to its Application Support project
  * folder, runs `codemap-build --root picked_dir --out <that>/graph.json`
- * (blocking), and on success execv()s a fresh codemap-view process
- * pointed at the result -- this call never returns on success. On
- * failure, shows a native error dialog and returns normally so the
- * caller keeps running exactly as it was.
+ * (blocking), and on success spawns a fresh codemap-view process (a new,
+ * independent pid -- see project_launcher.c for why not execv()) pointed
+ * at the result, then exits this one -- this call never returns on
+ * success. On failure, shows a native error dialog and returns normally
+ * so the caller keeps running exactly as it was.
  *
  * self_exe_path: this process's own resolved executable path (see
  * main.c) -- used both to find the sibling codemap-build binary (built

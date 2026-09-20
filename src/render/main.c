@@ -156,8 +156,24 @@ int main(int argc, char **argv) {
      * Open button (see project_launcher.h) picks a directory, builds it,
      * and execv()s a fresh copy of this same process with the result as
      * argv[1], so the "real" startup path below only ever needs to
-     * handle "a graph.json was given" vs "nothing was given yet". */
-    const char *graph_path = (argc >= 2) ? argv[1] : NULL;
+     * handle "a graph.json was given" vs "nothing was given yet".
+     *
+     * Xcode's default scheme silently injects "-NSDocumentRevisionsDebugMode
+     * YES" into every launched process's argv (a long-standing default for
+     * any auto-generated scheme, document-based app or not) -- without
+     * this skip, that pair was taken as argv[1] and codemap-view tried to
+     * open a "graph.json" literally named "-NSDocumentRevisionsDebugMode"
+     * every time it was run from Xcode's Run button, whether or not the
+     * scheme's own Arguments tab had anything configured. */
+    const char *graph_path = NULL;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-NSDocumentRevisionsDebugMode") == 0) {
+            i++; /* also skip its YES/NO value */
+            continue;
+        }
+        graph_path = argv[i];
+        break;
+    }
     char *self_exe_path = resolve_self_exe_path(argv[0]);
 
     Graph graph;
