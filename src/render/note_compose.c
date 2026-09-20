@@ -121,7 +121,7 @@ void note_compose_draw(struct nk_context *ctx, NoteSet *notes, const char *notes
     out_bounds->x = out_bounds->y = out_bounds->w = out_bounds->h = 0.0f;
     if (!g_open) return;
 
-    if (nk_begin(ctx, NOTE_COMPOSE_TITLE, nk_rect(320, 140, 380, 320),
+    if (nk_begin(ctx, NOTE_COMPOSE_TITLE, nk_rect(320, 140, 380, 400),
                  NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
                  NK_WINDOW_MINIMIZABLE)) {
         struct nk_vec2 size = nk_window_get_size(ctx);
@@ -141,12 +141,21 @@ void note_compose_draw(struct nk_context *ctx, NoteSet *notes, const char *notes
 
         hard_wrap(ctx->style.font, g_body, size.x - 24.0f);
 
-        /* 150 (not the raw ~90 the label/checkbox/button rows above and
-         * below sum to) is deliberate slack for nuklear's per-row gaps --
-         * too little here was pushing total content a few px past the
-         * window, triggering this window's own scrollbar for a two-line
-         * note with nothing that actually needed to scroll. */
-        float body_h = size.y - 150.0f;
+        /* 200 (not the raw ~90 the label/checkbox/button rows above and
+         * below sum to) is deliberate slack for nuklear's own per-frame
+         * chrome: header height, the footer strip NK_WINDOW_SCALABLE
+         * reserves for its resize grip, and the window/row padding and
+         * spacing around each of the rows above and below (nk_window_get_size
+         * returns the *outer* bounds, none of which nuklear itself
+         * subtracts before that call returns -- see nk_panel_begin). This
+         * needs to be a real upper bound on that overhead, not a rough
+         * guess: since it's subtracted from a size that scales with the
+         * window (not a fixed window height), underestimating it makes
+         * body_h too large *at every window size*, not just the default
+         * one -- this window's own outer scrollbar then shows up no
+         * matter how tall the window is made, which 150 here previously
+         * did (confirmed empirically, not just in theory). */
+        float body_h = size.y - 200.0f;
         if (body_h < 60.0f) body_h = 60.0f;
         nk_layout_row_dynamic(ctx, body_h, 1);
         nk_edit_string_zero_terminated(ctx, NK_EDIT_BOX, g_body, sizeof(g_body), nk_filter_default);
@@ -174,12 +183,25 @@ void note_compose_draw(struct nk_context *ctx, NoteSet *notes, const char *notes
 
         if (g_open) {
             struct nk_rect b = nk_window_get_bounds(ctx);
-            if (nk_window_is_collapsed(ctx, NOTE_COMPOSE_TITLE)) b.h = PANEL_HEADER_HEIGHT;
             out_bounds->x = b.x;
             out_bounds->y = b.y;
             out_bounds->w = b.w;
             out_bounds->h = b.h;
         }
+    } else if (nk_window_is_collapsed(ctx, NOTE_COMPOSE_TITLE)) {
+        /* nk_begin returns false while MINIMIZED, same as any other
+         * hidden/closed window -- see the matching comment in
+         * ui_panel_draw for the full explanation and why
+         * nk_window_get_bounds is still safe to call here. Without this,
+         * a shaded Note pane's tracked bounds silently went to zero (this
+         * function's own top-of-body reset, never overwritten since the
+         * block below never ran), so dragging its header also
+         * orbited/panned the 3D view underneath. */
+        struct nk_rect b = nk_window_get_bounds(ctx);
+        out_bounds->x = b.x;
+        out_bounds->y = b.y;
+        out_bounds->w = b.w;
+        out_bounds->h = panel_header_height(ctx);
     }
     nk_end(ctx);
 }

@@ -385,7 +385,7 @@ int main(int argc, char **argv) {
                                     fabs(mx - last_click_x) < 6.0 && fabs(my - last_click_y) < 6.0;
             if (is_double_click) {
                 PanelRect insp_hdr = inspector_bounds, note_hdr = note_bounds, props_hdr = properties_bounds;
-                insp_hdr.h = note_hdr.h = props_hdr.h = PANEL_HEADER_HEIGHT;
+                insp_hdr.h = note_hdr.h = props_hdr.h = panel_header_height(ctx);
                 if (panel_rect_contains(insp_hdr, (float)mx, (float)my)) {
                     nk_window_collapse(ctx, UI_PANEL_TITLE,
                         nk_window_is_collapsed(ctx, UI_PANEL_TITLE) ? NK_MAXIMIZED : NK_MINIMIZED);

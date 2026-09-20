@@ -18,6 +18,16 @@
 static char *g_cached_path = NULL;
 static char *g_cached_content = NULL;
 
+/* The content viewer's last-known cursor position (a rune/codepoint
+ * offset into g_cached_content, matching nk_edit's own indexing -- see
+ * the NK_EDIT_ACTIVE capture in draw_single_mode), so "+ Add note" can
+ * seed the line the user actually clicked on instead of always opening
+ * blank. -1 means "unknown": nothing has been clicked in the viewer since
+ * the last file load. Reset on every fresh load (below) so a stale
+ * position from a previously-viewed file can't leak into a note on a
+ * file the user hasn't clicked into yet. */
+static int g_content_cursor = -1;
+
 /* Two-step delete confirmation for the notes list -- see draw_note_row.
  * Reset whenever the selection context changes so an armed "Confirm?" on
  * one file's note doesn't silently carry over and land on the wrong note
@@ -69,6 +79,7 @@ static void load_file_if_needed(const char *path) {
     free(g_cached_content);
     g_cached_path = NULL;
     g_cached_content = NULL;
+    g_content_cursor = -1;
     if (!path) return;
 
     g_cached_path = xstrdup(path);
@@ -92,6 +103,26 @@ static void load_file_if_needed(const char *path) {
     fclose(f);
     g_cached_content = expand_tabs(buf);
     free(buf);
+}
+
+/* Line (1-based) containing the rune at `rune_offset` in `content`. Walks
+ * runes rather than bytes -- nk_edit's cursor is a codepoint count (see
+ * nk_utf_len in nuklear.h), so a byte-offset count would drift on any file
+ * with multi-byte UTF-8 content (e.g. in a comment) before the cursor.
+ * '\n' is always a lead byte on its own (ASCII), so it's unambiguous to
+ * spot while walking. */
+static int line_number_for_rune_offset(const char *content, int rune_offset) {
+    if (!content || rune_offset <= 0) return 1;
+    int line = 1;
+    int runes_seen = 0;
+    for (const unsigned char *p = (const unsigned char *)content; *p; p++) {
+        if ((*p & 0xC0) != 0x80) { /* lead byte of a rune, not a UTF-8 continuation byte */
+            if (runes_seen >= rune_offset) break;
+            runes_seen++;
+        }
+        if (*p == '\n') line++;
+    }
+    return line;
 }
 
 /* One note's summary line + body preview + Edit/Delete. Edit opens the
@@ -207,9 +238,17 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h,
 
     nk_layout_row_dynamic(ctx, content_h, 1);
     size_t len = g_cached_content ? strlen(g_cached_content) : 0;
-    nk_edit_string_zero_terminated(ctx, NK_EDIT_BOX | NK_EDIT_READ_ONLY,
-                                    g_cached_content ? g_cached_content : "",
-                                    (int)(len + 1), nk_filter_default);
+    nk_flags edit_state = nk_edit_string_zero_terminated(
+        ctx, NK_EDIT_BOX | NK_EDIT_READ_ONLY, g_cached_content ? g_cached_content : "",
+        (int)(len + 1), nk_filter_default);
+    /* NK_EDIT_ACTIVE means this widget has focus (was clicked into) this
+     * very frame -- ctx->current->edit.cursor was just freshly written by
+     * the call above in that case, so it's safe to read here. Stashed into
+     * our own static rather than re-read later, since nuklear itself
+     * doesn't reset it on blur but also won't hand it back through any
+     * public accessor once this widget stops being the active one -- see
+     * g_content_cursor's own comment. */
+    if (edit_state & NK_EDIT_ACTIVE) g_content_cursor = ctx->current->edit.cursor;
 
     const Note *found[64];
     size_t found_n = notes_find_for_path(notes, selected_path, found, 64);
@@ -231,7 +270,9 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h,
     nk_layout_row_dynamic(ctx, add_button_h, 1);
     if (nk_button_label(ctx, "+ Add note")) {
         const char *p[1] = { selected_path };
-        note_compose_open_add(p, 1, false, 1);
+        bool has_line = g_content_cursor >= 0;
+        int line = line_number_for_rune_offset(g_cached_content, g_content_cursor);
+        note_compose_open_add(p, 1, has_line, line);
     }
 }
 
@@ -250,11 +291,6 @@ void ui_panel_draw(struct nk_context *ctx, int window_width, int window_height,
                  NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
                  NK_WINDOW_MINIMIZABLE)) {
         struct nk_rect b = nk_window_get_bounds(ctx);
-        /* nk_window_get_bounds keeps reporting the *restored* size even
-         * while shaded/collapsed (double-click the header -- see main.c) --
-         * report just the header strip instead, so 3D interaction and
-         * label drawing correctly get the rest of the screen back. */
-        if (nk_window_is_collapsed(ctx, UI_PANEL_TITLE)) b.h = PANEL_HEADER_HEIGHT;
         out_bounds->x = b.x;
         out_bounds->y = b.y;
         out_bounds->w = b.w;
@@ -266,6 +302,29 @@ void ui_panel_draw(struct nk_context *ctx, int window_width, int window_height,
             struct nk_vec2 size = nk_window_get_size(ctx);
             draw_single_mode(ctx, size.y, selected_path, selected_language, notes, notes_md_path);
         }
+    } else if (nk_window_is_collapsed(ctx, UI_PANEL_TITLE)) {
+        /* nk_begin/nk_panel_begin returns false for a MINIMIZED window,
+         * not just a hidden/closed one (confirmed in nuklear.h: `return
+         * !(layout->flags & NK_WINDOW_HIDDEN) && !(layout->flags &
+         * NK_WINDOW_MINIMIZED);`) -- so this whole branch, not just the
+         * "if collapsed" line within it, used to be skipped while shaded,
+         * leaving out_bounds zeroed. panel_rect_contains treats w<=0 as
+         * "not open, nothing to avoid", so a shaded panel was invisible to
+         * the 3D-interaction gate entirely: dragging its still-visible,
+         * still-draggable header (nuklear draws and moves it regardless of
+         * this return value) also orbited/panned the 3D view underneath in
+         * the same gesture. ctx->current is still this window here (set
+         * unconditionally in nk_begin_titled before the collapse check
+         * that decides the return value), so nk_window_get_bounds is still
+         * safe to call -- just override its height to the real header
+         * strip, matching the shaded window's actual visible/draggable
+         * extent, same as the expanded branch would if it could see this
+         * state. */
+        struct nk_rect b = nk_window_get_bounds(ctx);
+        out_bounds->x = b.x;
+        out_bounds->y = b.y;
+        out_bounds->w = b.w;
+        out_bounds->h = panel_header_height(ctx);
     } else {
         out_bounds->x = out_bounds->y = out_bounds->w = out_bounds->h = 0.0f;
     }

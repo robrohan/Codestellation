@@ -42,6 +42,7 @@ add_executable(codemap-view
     render/properties_panel.c
     render/project_launcher.c
     render/labels.c
+    render/panel_rect.c
     ${CMAKE_SOURCE_DIR}/vendor/tinyfiledialogs/tinyfiledialogs.c
 )
 target_include_directories(codemap-view PRIVATE

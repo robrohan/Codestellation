@@ -22,7 +22,6 @@ char *properties_panel_draw(struct nk_context *ctx, int *show_origin, bool has_n
                  NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
                  NK_WINDOW_MINIMIZABLE)) {
         struct nk_rect b = nk_window_get_bounds(ctx);
-        if (nk_window_is_collapsed(ctx, PROPERTIES_PANEL_TITLE)) b.h = PANEL_HEADER_HEIGHT;
         out_bounds->x = b.x;
         out_bounds->y = b.y;
         out_bounds->w = b.w;
@@ -48,6 +47,15 @@ char *properties_panel_draw(struct nk_context *ctx, int *show_origin, bool has_n
             nk_layout_row_dynamic(ctx, 26, 1);
             if (nk_button_label(ctx, "Export Notes...")) *out_export_clicked = true;
         }
+    } else if (nk_window_is_collapsed(ctx, PROPERTIES_PANEL_TITLE)) {
+        /* nk_begin returns false while MINIMIZED -- see the matching
+         * comment in ui_panel_draw for the full explanation and why
+         * nk_window_get_bounds is still safe to call here. */
+        struct nk_rect b = nk_window_get_bounds(ctx);
+        out_bounds->x = b.x;
+        out_bounds->y = b.y;
+        out_bounds->w = b.w;
+        out_bounds->h = panel_header_height(ctx);
     } else {
         out_bounds->x = out_bounds->y = out_bounds->w = out_bounds->h = 0.0f;
     }
