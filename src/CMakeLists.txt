@@ -13,13 +13,15 @@ add_executable(codemap-build
     lang/lisp/lisp_adapter.c
     lang/python/python_adapter.c
     lang/go/go_adapter.c
+    lang/php/php_adapter.c
+    lang/vbnet/vbnet_adapter.c
 )
 
 target_include_directories(codemap-build PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/vendor/json
 )
-target_link_libraries(codemap-build PRIVATE tree-sitter tree_sitter_c tree_sitter_csharp tree_sitter_lisp tree_sitter_python tree_sitter_go)
+target_link_libraries(codemap-build PRIVATE tree-sitter tree_sitter_c tree_sitter_csharp tree_sitter_lisp tree_sitter_python tree_sitter_go tree_sitter_php tree_sitter_vbnet)
 
 add_executable(codemap-view
     common/pathutil.c

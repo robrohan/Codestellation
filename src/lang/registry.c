@@ -4,6 +4,8 @@
 #include "lisp/lisp_adapter.h"
 #include "python/python_adapter.h"
 #include "go/go_adapter.h"
+#include "php/php_adapter.h"
+#include "vbnet/vbnet_adapter.h"
 #include <string.h>
 
 #define MAX_ADAPTERS 16
@@ -18,6 +20,8 @@ void adapter_registry_init(void) {
     g_adapters[g_adapter_count++] = lisp_adapter_get();
     g_adapters[g_adapter_count++] = python_adapter_get();
     g_adapters[g_adapter_count++] = go_adapter_get();
+    g_adapters[g_adapter_count++] = php_adapter_get();
+    g_adapters[g_adapter_count++] = vbnet_adapter_get();
 }
 
 const LanguageAdapter *adapter_for_extension(const char *ext) {

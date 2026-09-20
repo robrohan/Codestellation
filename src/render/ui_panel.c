@@ -34,6 +34,34 @@ static void reset_delete_arm_if_context_changed(const char *context) {
     }
 }
 
+/* Nuklear's default font atlas is baked over the default glyph range,
+ * which starts at space (0x20) -- a raw tab (0x09) has no glyph in it, so
+ * the renderer falls back to a tofu/"?" placeholder for it. This is a
+ * read-only preview, not a byte-exact editable buffer, so the simplest fix
+ * is to expand tabs to spaces before display rather than teach the atlas
+ * about control characters. Fixed-width (not column-aware tab stops) --
+ * good enough for a preview, and avoids tracking column position across
+ * embedded newlines. Caller frees. */
+static char *expand_tabs(const char *src) {
+    const int tab_width = 4;
+    size_t len = strlen(src);
+    size_t extra = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (src[i] == '\t') extra += (size_t)(tab_width - 1);
+    }
+    char *out = (char *)malloc(len + extra + 1);
+    size_t o = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (src[i] == '\t') {
+            for (int s = 0; s < tab_width; s++) out[o++] = ' ';
+        } else {
+            out[o++] = src[i];
+        }
+    }
+    out[o] = '\0';
+    return out;
+}
+
 static void load_file_if_needed(const char *path) {
     if (path && g_cached_path && strcmp(g_cached_path, path) == 0) return;
 
@@ -62,7 +90,8 @@ static void load_file_if_needed(const char *path) {
     size_t got = fread(buf, 1, (size_t)size, f);
     buf[got] = '\0';
     fclose(f);
-    g_cached_content = buf;
+    g_cached_content = expand_tabs(buf);
+    free(buf);
 }
 
 /* One note's summary line + body preview + Edit/Delete. Edit opens the

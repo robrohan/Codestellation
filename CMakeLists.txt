@@ -102,6 +102,41 @@ if(EXISTS ${ts_go_SOURCE_DIR}/src/scanner.c)
 endif()
 target_include_directories(tree_sitter_go PUBLIC ${ts_go_SOURCE_DIR}/src)
 
+# --- tree-sitter-php grammar (PHP adapter) -------------------------------
+# Upstream repo hosts two grammars (HTML+embedded-PHP, and PHP-only) side by
+# side; php_only is the one used here since this adapter only cares about
+# code that's always inside <?php ?> tags (namespaces/classes/use/require)
+# and never needs the HTML-embedding half. Has an external scanner.
+FetchContent_Declare(ts_php
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-php
+    GIT_TAG v0.24.2
+    GIT_SHALLOW TRUE
+)
+FetchContent_Populate(ts_php)
+add_library(tree_sitter_php STATIC ${ts_php_SOURCE_DIR}/php_only/src/parser.c)
+if(EXISTS ${ts_php_SOURCE_DIR}/php_only/src/scanner.c)
+    target_sources(tree_sitter_php PRIVATE ${ts_php_SOURCE_DIR}/php_only/src/scanner.c)
+endif()
+target_include_directories(tree_sitter_php PUBLIC ${ts_php_SOURCE_DIR}/php_only/src)
+
+# --- tree-sitter-vb-dotnet grammar (Visual Basic .NET adapter) -----------
+# No tagged release exists yet (young, unofficial grammar -- the only
+# actively maintained VB.NET grammar for tree-sitter at the time this was
+# added) so this is pinned to a specific commit rather than a tag, and not
+# shallow-cloned since GitHub's support for shallow-fetching an arbitrary
+# commit (as opposed to a branch/tag ref) isn't guaranteed. No external
+# scanner.
+FetchContent_Declare(ts_vbnet
+    GIT_REPOSITORY https://github.com/CodeAnt-AI/tree-sitter-vb-dotnet
+    GIT_TAG cfca210ce8fdcb5245bd9cd5c47ce0a21a8488d5
+)
+FetchContent_Populate(ts_vbnet)
+add_library(tree_sitter_vbnet STATIC ${ts_vbnet_SOURCE_DIR}/src/parser.c)
+if(EXISTS ${ts_vbnet_SOURCE_DIR}/src/scanner.c)
+    target_sources(tree_sitter_vbnet PRIVATE ${ts_vbnet_SOURCE_DIR}/src/scanner.c)
+endif()
+target_include_directories(tree_sitter_vbnet PUBLIC ${ts_vbnet_SOURCE_DIR}/src)
+
 # --- GLFW (window/input/GL context, cross-platform) ----------------------
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
