@@ -36,6 +36,7 @@
 #include "fonts.h"
 #include "canvas_view.h"
 #include "../canvas/project.h"
+#include "../canvas/export.h"
 #include "panel_rect.h"
 #include "../common/pathutil.h"
 #include "../graph/graph.h"
@@ -723,8 +724,8 @@ int main(int argc, char **argv) {
                               &lg.notes, lg.notes_path, &inspector_bounds);
                 note_compose_draw(ctx, &lg.notes, lg.notes_path, &note_bounds);
             }
-            props = properties_panel_draw(ctx, &show_origin, lg.notes_path != NULL, &export_notes_clicked,
-                                          &properties_bounds);
+            props = properties_panel_draw(ctx, &show_origin, lg.notes_path != NULL, have_project,
+                                          &export_notes_clicked, &properties_bounds);
             /* In code view this draws just the breadcrumb bar, over the 3D. */
             canvas_view_draw(ctx, width, height, &canvas_panels);
             if (!canvas_mode) {
@@ -769,6 +770,20 @@ int main(int argc, char **argv) {
                 project_activate(win, &project, &have_project, &p);
             } else {
                 tinyfd_messageBox("Codestellation", "Could not open or create that project.", "ok", "error", 1);
+            }
+        }
+        if ((props.action == PROPS_EXPORT_MANUAL || props.action == PROPS_EXPORT_LLM) && have_project) {
+            bool llm = props.action == PROPS_EXPORT_LLM;
+            char suggested[512];
+            snprintf(suggested, sizeof(suggested), "%s %s.md", project.title, llm ? "brief" : "manual");
+            const char *patterns[1] = { "*.md" };
+            const char *dest = tinyfd_saveFileDialog(llm ? "Export LLM Brief" : "Export Manual", suggested, 1,
+                                                     patterns, "Markdown");
+            if (dest) {
+                canvas_view_flush(); /* the export reads the canvases from disk */
+                if (!export_project(&project, llm ? EXPORT_LLM : EXPORT_MANUAL, dest)) {
+                    tinyfd_messageBox("Codestellation", "Could not write the export.", "ok", "error", 1);
+                }
             }
         }
         free(props.path);

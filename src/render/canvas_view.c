@@ -666,6 +666,10 @@ void canvas_view_close(void) {
 
 bool canvas_view_is_open(void) { return g_open; }
 
+void canvas_view_flush(void) {
+    if (g_open) flush();
+}
+
 bool canvas_view_in_code(void) { return g_open && g_in_code; }
 
 void canvas_view_enter_code(const char *title) {

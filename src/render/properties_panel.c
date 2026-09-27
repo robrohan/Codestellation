@@ -13,12 +13,12 @@
 #include <stddef.h>
 #include <stdlib.h>
 
-PropsResult properties_panel_draw(struct nk_context *ctx, int *show_origin, bool has_notes,
+PropsResult properties_panel_draw(struct nk_context *ctx, int *show_origin, bool has_notes, bool has_project,
                                   bool *out_export_clicked, PanelRect *out_bounds) {
     PropsResult result = { PROPS_NONE, NULL, NULL };
     *out_export_clicked = false;
 
-    float h = has_notes ? 250.0f : 220.0f;
+    float h = 220.0f + (has_notes ? 30.0f : 0.0f) + (has_project ? 64.0f : 0.0f);
     if (nk_begin(ctx, PROPERTIES_PANEL_TITLE, nk_rect(20, 20, 260, h),
                  NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
                  NK_WINDOW_MINIMIZABLE)) {
@@ -63,6 +63,12 @@ PropsResult properties_panel_draw(struct nk_context *ctx, int *show_origin, bool
                 result.action = PROPS_OPEN_FOLDER;
                 result.path = xstrdup(dir);
             }
+        }
+
+        if (has_project) {
+            nk_layout_row_dynamic(ctx, 26, 1);
+            if (nk_button_label(ctx, "Export Manual...")) result.action = PROPS_EXPORT_MANUAL;
+            if (nk_button_label(ctx, "Export LLM Brief...")) result.action = PROPS_EXPORT_LLM;
         }
 
         nk_layout_row_dynamic(ctx, 24, 1);

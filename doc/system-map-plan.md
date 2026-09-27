@@ -175,8 +175,8 @@ canvas "looks great". What the spike established, reusable in step 4:
   (`cmake/embed_file.cmake`). `src/render/fonts.c` bakes each at 10/14/20/28/40
   logical px × framebuffer scale, for crisp text on Retina. Any other size is
   the next baked size scaled via a per-frame pool (`fonts_sized`). The atlas
-  is 1024×4096 at 2×. Panels now use Inter 14, the file preview uses Mono 13
-  (the user finds the preview a bit small; bump `MONO_UI_SIZE` sometime).
+  is 1024×4096 at 2×. Panels use Inter 14, the file preview Mono 14 (bumped
+  from 13 at the user's request; both reuse the canvas bake).
 - `src/render/md_render.c`: markdown subset with word wrap, drawn straight
   into a Nuklear command buffer.
 - `src/render/canvas_view.c`: grid, zoom around the cursor, pan, drag,
@@ -260,11 +260,10 @@ click a weak link to jump to its original box.
 ### 6. Later
 
 - ~~Colour/readability polish~~ (done in step 2).
-- **Inspector scroll jump:** clicking a line in the source preview and then
-  "+ Add note" opens the Note pane on the right line, but scrolls the
-  preview back to the top of the file. It should stay on that line, since
-  the surrounding code is context for the note.
-- Source preview font is a bit small (`MONO_UI_SIZE` in `fonts.c`).
+- ~~Inspector scroll jump~~: fixed. `nk_edit_string` only keeps scroll
+  while focused, so the preview now owns its `nk_text_edit` (drawn with
+  `nk_edit_buffer`).
+- ~~Source preview font size~~: bumped to 14.
 - Stable code layouts: today only dragged nodes are saved
   (`graph.overlay.json`) and everything else is laid out fresh on each load,
   so the picture shifts when files are added. Option: save every node's
@@ -272,11 +271,15 @@ click a weak link to jump to its original box.
 - Reuse the cached code graph instead of rebuilding on every shift+click,
   with an explicit Rebuild. Deferred until rebuild time is an actual problem
   (the user's call).
-- Manual export: depth-first walk producing a document (canvas = section,
-  box = subsection with its note, edges as "A → B (label)", code leaves with
-  file notes + generated summary: languages, file count, most-depended-on
-  files).
-- LLM briefing: same walk, terser template.
+- ~~Manual export / LLM briefing~~: done (`src/canvas/export.c`, Properties >
+  Export Manual... / Export LLM Brief...). The walk goes depth-first in
+  reading order (rows, then columns), with groups nesting the boxes whose
+  centre they contain. Box lines become Markdown hard breaks. Code summaries
+  come from the cached graph.json and notes; a box that has never been
+  opened says so rather than building. The LLM variant adds a preface and
+  full breadcrumb headings. The cache location is shared with the build via
+  `src/common/code_cache.c`, and was verified to produce the same folder
+  names as before.
 - Include code notes in global search.
 
 ## Open questions

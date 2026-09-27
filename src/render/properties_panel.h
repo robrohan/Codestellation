@@ -36,6 +36,8 @@ typedef enum {
     PROPS_OPEN_FOLDER,   /* path: directory to build and explore in 3D */
     PROPS_OPEN_PROJECT,  /* path: a project.json */
     PROPS_NEW_PROJECT,   /* path: directory to create project.json in; title: its title */
+    PROPS_EXPORT_MANUAL, /* no path: main.c asks where to save */
+    PROPS_EXPORT_LLM,
 } PropsAction;
 
 /* What the user asked for this frame. The native dialogs (folder/file
@@ -47,7 +49,8 @@ typedef struct {
     char *title;
 } PropsResult;
 
-PropsResult properties_panel_draw(struct nk_context *ctx, int *show_origin, bool has_notes,
+/* has_project: a system-map project is open, which adds its export buttons. */
+PropsResult properties_panel_draw(struct nk_context *ctx, int *show_origin, bool has_notes, bool has_project,
                                   bool *out_export_clicked, PanelRect *out_bounds);
 
 #endif

@@ -27,11 +27,13 @@ add_executable(Codestellation
     common/pathutil.c
     common/symtab.c
     common/thread.c
+    common/code_cache.c
     graph/graph.c
     graph/graph_json.c
     canvas/canvas_doc.c
     canvas/project.c
     canvas/canvas_index.c
+    canvas/export.c
     pipeline/walk.c
     pipeline/parse.c
     pipeline/resolve.c

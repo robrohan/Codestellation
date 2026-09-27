@@ -107,6 +107,14 @@ files, so Obsidian can open them too. On the canvas:
 
 Every change saves to the `.canvas` file automatically.
 
+**Export.** With a project open, Properties > Export Manual... writes the
+whole system map as one Markdown document: each canvas a section, each box a
+subsection, groups nesting their boxes, edges listed as connections, and for
+boxes with folder links a code summary (languages, file counts, most
+depended-on files) plus your notes on the code. Export LLM Brief... writes
+the same content framed as context for an AI assistant, with every
+component's full breadcrumb path in its heading.
+
 **Folders (3D explorer).** Properties > Open Folder... builds a directory's
 dependency graph and shows it in 3D: left-drag empty space to orbit, scroll
 to zoom, right-click a node to inspect its file, drag a node to reposition

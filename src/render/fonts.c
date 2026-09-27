@@ -26,8 +26,10 @@ extern const size_t font_jetbrains_mono_size;
 static const float k_sizes[] = { 10.0f, 14.0f, 20.0f, 28.0f, 40.0f };
 #define SIZE_COUNT (sizeof(k_sizes) / sizeof(k_sizes[0]))
 
-#define UI_SIZE 14.0f   /* one of k_sizes -- panels reuse the canvas bake */
-#define MONO_UI_SIZE 13.0f
+/* Both are in k_sizes, so panels and the source preview reuse the canvas
+ * bake rather than adding fonts to the atlas. */
+#define UI_SIZE 14.0f
+#define MONO_UI_SIZE 14.0f
 
 /* Latin-1 plus the typographic punctuation people paste into notes
  * (dashes, curly quotes, bullet, ellipsis, arrows). Nuklear keeps this
@@ -44,7 +46,6 @@ static const nk_rune k_ranges[] = {
 };
 
 static struct nk_font *g_fonts[FONT_STYLE_COUNT][SIZE_COUNT];
-static struct nk_font *g_mono_ui;
 static float g_scale = 1.0f;
 
 #define POOL_SIZE 256
@@ -75,26 +76,23 @@ void fonts_add(struct nk_font_atlas *atlas, float fb_scale) {
             g_fonts[s][i] = add_one(atlas, data[s], sizes[s], k_sizes[i]);
         }
     }
-    g_mono_ui = add_one(atlas, font_jetbrains_mono, font_jetbrains_mono_size, MONO_UI_SIZE);
 }
 
 void fonts_finish(void) {
     for (int s = 0; s < FONT_STYLE_COUNT; s++) {
         for (size_t i = 0; i < SIZE_COUNT; i++) g_fonts[s][i]->handle.height /= g_scale;
     }
-    g_mono_ui->handle.height /= g_scale;
 }
 
-const struct nk_user_font *fonts_ui(void) {
+static const struct nk_user_font *baked(FontStyle style, float px) {
     for (size_t i = 0; i < SIZE_COUNT; i++) {
-        if (k_sizes[i] == UI_SIZE) return &g_fonts[FONT_REGULAR][i]->handle;
+        if (k_sizes[i] == px) return &g_fonts[style][i]->handle;
     }
-    return &g_fonts[FONT_REGULAR][0]->handle;
+    return &g_fonts[style][0]->handle;
 }
 
-const struct nk_user_font *fonts_mono(void) {
-    return &g_mono_ui->handle;
-}
+const struct nk_user_font *fonts_ui(void) { return baked(FONT_REGULAR, UI_SIZE); }
+const struct nk_user_font *fonts_mono(void) { return baked(FONT_MONO, MONO_UI_SIZE); }
 
 const struct nk_user_font *fonts_sized(FontStyle style, float px) {
     size_t i = 0;

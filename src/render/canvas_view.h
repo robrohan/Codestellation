@@ -56,6 +56,10 @@ void canvas_view_close(void);
 
 bool canvas_view_is_open(void);
 
+/* Writes any pending (debounced) edit to disk now -- before something
+ * reads the canvas files, like an export. */
+void canvas_view_flush(void);
+
 void canvas_view_update(const CanvasInput *in, int width, int height);
 
 /* Folder links. Shift+click (or "Open code") on a box whose [[links]]
