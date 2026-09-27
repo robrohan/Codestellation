@@ -768,8 +768,14 @@ int main(int argc, char **argv) {
             }
             if (ok) {
                 project_activate(win, &project, &have_project, &p);
+            } else if (props.action == PROPS_OPEN_PROJECT) {
+                char msg[4400];
+                snprintf(msg, sizeof(msg),
+                         "That doesn't look like a Codestellation project:\n%s\n\n"
+                         "Pick a project's project.json (make one with New Project...).", props.path);
+                tinyfd_messageBox("Codestellation", msg, "ok", "error", 1);
             } else {
-                tinyfd_messageBox("Codestellation", "Could not open or create that project.", "ok", "error", 1);
+                tinyfd_messageBox("Codestellation", "Could not create a project in that folder.", "ok", "error", 1);
             }
         }
         if ((props.action == PROPS_EXPORT_MANUAL || props.action == PROPS_EXPORT_LLM) && have_project) {

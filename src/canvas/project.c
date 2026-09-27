@@ -90,7 +90,11 @@ bool project_open(const char *path, Project *out) {
 
     struct json_value_s *root = json_parse(buf, got);
     struct json_object_s *obj = root ? json_value_as_object(root) : NULL;
-    if (!obj) {
+    /* A project names its root canvas. Requiring that keeps some other
+     * JSON file (picked by mistake) from being "opened" -- and getting a
+     * root.canvas created next to it. */
+    struct json_value_s *root_v = obj ? obj_get(obj, "root") : NULL;
+    if (!obj || !root_v || !json_value_as_string(root_v)) {
         free(root);
         free(buf);
         return false;

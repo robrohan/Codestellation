@@ -28,7 +28,8 @@ typedef struct {
 void project_free(Project *p);
 
 /* Reads project.json at `path`; also creates the root canvas if it's
- * missing. false if the file can't be read or parsed. */
+ * missing. false if the file can't be read or parsed, or has no "root"
+ * (so it isn't a project). */
 bool project_open(const char *path, Project *out);
 
 /* Creates dir/project.json (refusing to overwrite an existing one) and an

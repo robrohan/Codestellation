@@ -49,9 +49,17 @@ PropsResult properties_panel_draw(struct nk_context *ctx, int *show_origin, bool
             }
         }
         if (nk_button_label(ctx, "Open Project...")) {
+#if defined(__APPLE__)
+            /* No filter on macOS: tinyfd turns "*.json" into osascript's
+             * `choose file of type {"json"}`, and `of type` wants a type
+             * identifier (public.json), not an extension -- so every file
+             * came up greyed out. main.c checks what was picked. */
+            const char *file = tinyfd_openFileDialog("Open Project (project.json)", "", 0, NULL, NULL, 0);
+#else
             const char *patterns[1] = { "*.json" };
             const char *file = tinyfd_openFileDialog("Open Project (project.json)", "", 1, patterns,
                                                      "Codestellation project", 0);
+#endif
             if (file) {
                 result.action = PROPS_OPEN_PROJECT;
                 result.path = xstrdup(file);
