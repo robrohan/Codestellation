@@ -35,6 +35,7 @@
 #include "theme.h"
 #include "fonts.h"
 #include "canvas_view.h"
+#include "../canvas/project.h"
 #include "panel_rect.h"
 #include "../common/pathutil.h"
 #include "../graph/graph.h"
@@ -231,6 +232,31 @@ static void loaded_graph_show(const LoadedGraph *lg, GLScene *scene, Camera *cam
     if (radius > 0.1f) camera->distance = (radius / sinf(camera->fovy * 0.5f)) * 1.2f;
 }
 
+static bool ends_with(const char *s, const char *suffix) {
+    size_t n = strlen(s), m = strlen(suffix);
+    return n >= m && strcmp(s + n - m, suffix) == 0;
+}
+
+/* Swaps the open system-map project for `p` (taking ownership) and shows
+ * its root canvas. */
+static void project_activate(GLFWwindow *win, Project *current, bool *have_project, Project *p) {
+    canvas_view_close();
+    if (*have_project) project_free(current);
+    *current = *p;
+    *have_project = true;
+    canvas_view_open(current->root_path, current->title);
+    char title[512];
+    snprintf(title, sizeof(title), "Codestellation \xE2\x80\x94 %s", current->title);
+    glfwSetWindowTitle(win, title);
+}
+
+static void project_deactivate(GLFWwindow *win, Project *current, bool *have_project) {
+    canvas_view_close();
+    if (*have_project) project_free(current);
+    *have_project = false;
+    glfwSetWindowTitle(win, "Codestellation");
+}
+
 int main(int argc, char **argv) {
     /* No graph.json is a valid way to launch -- the Properties pane's
      * Open button builds a picked directory and swaps it in at runtime
@@ -254,12 +280,20 @@ int main(int argc, char **argv) {
         break;
     }
 
+    /* A project.json on the command line opens that project's canvas
+     * instead of a graph (opened below, once the window exists). */
+    const char *project_arg = NULL;
+    if (graph_path && ends_with(graph_path, "project.json")) {
+        project_arg = graph_path;
+        graph_path = NULL;
+    }
+
     LoadedGraph lg;
     if (!loaded_graph_load(&lg, graph_path)) {
         fprintf(stderr, "error: could not read %s\n", graph_path);
         return 1;
     }
-    if (!graph_path) printf("no project loaded -- use Properties > Open to pick a directory\n");
+    if (!graph_path && !project_arg) printf("nothing loaded -- use Properties to open a project or folder\n");
 
     if (!glfwInit()) {
         fprintf(stderr, "error: glfwInit failed\n");
@@ -362,17 +396,41 @@ int main(int argc, char **argv) {
      * nk_bool, an int in this build), see properties_panel.h. */
     int show_origin = 1;
 
-    /* Properties' "Canvas view (spike)" checkbox: swaps the 3D graph for
-     * the canvas spike (canvas_view.h). Same int convention. */
-    int canvas_view = 0;
+    /* The open system-map project, if any. While one is open the canvas
+     * (canvas_view.h) replaces the 3D view. */
+    Project project;
+    bool have_project = false;
+    if (project_arg) {
+        Project p;
+        if (project_open(project_arg, &p)) {
+            project_activate(win, &project, &have_project, &p);
+        } else {
+            fprintf(stderr, "error: could not open project %s\n", project_arg);
+        }
+    }
+    PanelRect crumbs_bounds = { 0, 0, 0, 0 };
+    PanelRect editor_bounds = { 0, 0, 0, 0 };
+    bool esc_was_down = false, delete_was_down = false;
 
     glEnable(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_DEPTH_TEST);
 
     while (!glfwWindowShouldClose(win)) {
         glfwPollEvents();
-        if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-            glfwSetWindowShouldClose(win, GLFW_TRUE);
+        /* Esc walks back up the canvas trail when a project is open (see
+         * canvas_view_escape) and only quits in the plain 3D explorer.
+         * Delete/Backspace remove the canvas selection. Both edge-triggered. */
+        bool canvas_mode = canvas_view_is_open();
+        bool esc_down = glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS;
+        bool delete_down = glfwGetKey(win, GLFW_KEY_DELETE) == GLFW_PRESS ||
+                           glfwGetKey(win, GLFW_KEY_BACKSPACE) == GLFW_PRESS;
+        bool esc_pressed = esc_down && !esc_was_down;
+        bool delete_pressed = delete_down && !delete_was_down;
+        esc_was_down = esc_down;
+        delete_was_down = delete_down;
+        if (esc_pressed) {
+            if (canvas_mode) canvas_view_escape();
+            else glfwSetWindowShouldClose(win, GLFW_TRUE);
         }
 
         /* Swap in a finished Open build at the top of the frame, before
@@ -428,10 +486,12 @@ int main(int argc, char **argv) {
          * wired up. */
         bool over_panel = panel_rect_contains(inspector_bounds, (float)mx, (float)my) ||
                            panel_rect_contains(note_bounds, (float)mx, (float)my) ||
-                           panel_rect_contains(properties_bounds, (float)mx, (float)my);
-        /* The canvas spike takes all non-panel mouse input; the 3D view
-         * treats it exactly like the cursor being over a panel. */
-        bool block_3d = over_panel || canvas_view;
+                           panel_rect_contains(properties_bounds, (float)mx, (float)my) ||
+                           panel_rect_contains(crumbs_bounds, (float)mx, (float)my) ||
+                           panel_rect_contains(editor_bounds, (float)mx, (float)my);
+        /* The canvas takes all non-panel mouse input; the 3D view treats
+         * it exactly like the cursor being over a panel. */
+        bool block_3d = over_panel || canvas_mode;
         int left_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT);
         int middle_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_MIDDLE);
         int right_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT);
@@ -582,14 +642,18 @@ int main(int argc, char **argv) {
         left_was_down = (left_state == GLFW_PRESS);
 
         float scroll_y = ctx->input.mouse.scroll_delta.y;
-        if (canvas_view) {
+        if (canvas_mode) {
             CanvasInput cin = {
                 .mx = (float)mx, .my = (float)my,
                 .left = left_state == GLFW_PRESS,
                 .right = right_state == GLFW_PRESS,
                 .middle = middle_state == GLFW_PRESS,
+                .shift = glfwGetKey(win, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+                         glfwGetKey(win, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS,
                 .scroll = scroll_y,
+                .time = glfwGetTime(),
                 .over_panel = over_panel,
+                .key_delete = delete_pressed,
             };
             canvas_view_update(&cin, width, height);
         }
@@ -603,7 +667,7 @@ int main(int argc, char **argv) {
             camera_zoom(&camera, scroll_y * step);
         }
 
-        char *picked_dir = NULL;
+        PropsResult props = { PROPS_NONE, NULL, NULL };
         bool export_notes_clicked = false;
         {
             const char *sel_path = selected >= 0 ? lg.graph.nodes[selected].path : NULL;
@@ -615,7 +679,7 @@ int main(int argc, char **argv) {
             }
             for (size_t i = 0; i < cluster_count; i++) cluster_paths[i] = lg.graph.nodes[cluster_ids[i]].path;
 
-            if (canvas_view) {
+            if (canvas_mode) {
                 /* Inspector/Note describe 3D selections -- hidden here,
                  * with their bounds cleared so they don't block canvas
                  * input from where they used to be. */
@@ -626,11 +690,13 @@ int main(int argc, char **argv) {
                               &lg.notes, lg.notes_path, &inspector_bounds);
                 note_compose_draw(ctx, &lg.notes, lg.notes_path, &note_bounds);
             }
-            picked_dir = properties_panel_draw(ctx, &show_origin, &canvas_view, lg.notes_path != NULL,
-                                                &export_notes_clicked, &properties_bounds);
-            if (canvas_view) {
-                canvas_view_draw(ctx, width, height);
+            props = properties_panel_draw(ctx, &show_origin, lg.notes_path != NULL, &export_notes_clicked,
+                                          &properties_bounds);
+            if (canvas_mode) {
+                canvas_view_draw(ctx, width, height, &crumbs_bounds, &editor_bounds);
             } else {
+                crumbs_bounds = (PanelRect){ 0, 0, 0, 0 };
+                editor_bounds = (PanelRect){ 0, 0, 0, 0 };
                 labels_draw(ctx, width, height, inspector_bounds, note_bounds, properties_bounds,
                             view_proj, lg.positions, &lg.graph, &lg.notes, selected);
             }
@@ -649,13 +715,31 @@ int main(int argc, char **argv) {
             }
         }
 
-        if (picked_dir) {
-            /* One build at a time -- the pipeline isn't reentrant. A
-             * second Open while one is running is dropped; the status
-             * strip already shows what's in progress. */
-            if (!build) build = project_build_start(picked_dir);
-            free(picked_dir);
+        if (props.action == PROPS_OPEN_FOLDER) {
+            /* Plain folder exploring leaves project mode. One build at a
+             * time -- the pipeline isn't reentrant; a second Open while one
+             * is running is dropped (the status strip shows what's running). */
+            project_deactivate(win, &project, &have_project);
+            if (!build) build = project_build_start(props.path);
+        } else if (props.action == PROPS_OPEN_PROJECT || props.action == PROPS_NEW_PROJECT) {
+            Project p;
+            bool ok;
+            if (props.action == PROPS_NEW_PROJECT) {
+                /* Picking a folder that already has a project just opens it. */
+                char *existing = path_join(props.path, "project.json");
+                ok = path_exists(existing) ? project_open(existing, &p) : project_create(props.path, props.title, &p);
+                free(existing);
+            } else {
+                ok = project_open(props.path, &p);
+            }
+            if (ok) {
+                project_activate(win, &project, &have_project, &p);
+            } else {
+                tinyfd_messageBox("Codestellation", "Could not open or create that project.", "ok", "error", 1);
+            }
         }
+        free(props.path);
+        free(props.title);
 
         if (export_notes_clicked && lg.notes_path) {
             /* graph.notes.md lives under Application Support, easy to
@@ -685,12 +769,12 @@ int main(int argc, char **argv) {
         glViewport(0, 0, fb_width, fb_height);
         {
             float r, g, b;
-            theme_rgb(canvas_view ? g_theme.canvas_background : g_theme.background, &r, &g, &b);
+            theme_rgb(canvas_view_is_open() ? g_theme.canvas_background : g_theme.background, &r, &g, &b);
             glClearColor(r, g, b, 1.0f);
         }
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        if (!canvas_view) {
+        if (!canvas_view_is_open()) {
             gl_scene_draw(&scene, view_proj, selected);
             if (show_origin) gl_scene_draw_axis(&scene, view_proj, AXIS_LENGTH);
         }
@@ -704,6 +788,9 @@ int main(int argc, char **argv) {
      * a big codebase could take a long while, and process exit ends the
      * worker anyway. Its half-written graph.json only matters if someone
      * later passes that exact file on the command line. */
+    /* Saves any pending canvas edit; must run while the window still
+     * exists (it resets the title). */
+    project_deactivate(win, &project, &have_project);
     gl_scene_destroy(&scene);
     ui_panel_shutdown();
     nk_glfw3_shutdown(&glfw_nk);

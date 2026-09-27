@@ -11,13 +11,14 @@
 #include "tinyfiledialogs.h"
 #include "../common/pathutil.h"
 #include <stddef.h>
+#include <stdlib.h>
 
-char *properties_panel_draw(struct nk_context *ctx, int *show_origin, int *canvas_view, bool has_notes,
-                             bool *out_export_clicked, PanelRect *out_bounds) {
-    char *picked = NULL;
+PropsResult properties_panel_draw(struct nk_context *ctx, int *show_origin, bool has_notes,
+                                  bool *out_export_clicked, PanelRect *out_bounds) {
+    PropsResult result = { PROPS_NONE, NULL, NULL };
     *out_export_clicked = false;
 
-    float h = has_notes ? 208.0f : 178.0f;
+    float h = has_notes ? 250.0f : 220.0f;
     if (nk_begin(ctx, PROPERTIES_PANEL_TITLE, nk_rect(20, 20, 260, h),
                  NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
                  NK_WINDOW_MINIMIZABLE)) {
@@ -27,18 +28,45 @@ char *properties_panel_draw(struct nk_context *ctx, int *show_origin, int *canva
         out_bounds->w = b.w;
         out_bounds->h = b.h;
 
+        /* The dialogs below are blocking and modal (osascript on macOS) --
+         * fine to call straight from widget code, same as any other
+         * synchronous button action here. NULL means canceled. */
         nk_layout_row_dynamic(ctx, 26, 1);
-        if (nk_button_label(ctx, "Open...")) {
-            /* Blocking, modal (shells out to osascript on macOS) -- fine
-             * to call straight from widget code, same as any other
-             * synchronous button action here. NULL means canceled. */
+        if (nk_button_label(ctx, "New Project...")) {
+            const char *dir = tinyfd_selectFolderDialog("Choose a folder for the new project", NULL);
+            if (dir) {
+                char *d = xstrdup(dir);
+                /* A non-NULL default makes this a text prompt (NULL would
+                 * make it a password box). */
+                const char *title = tinyfd_inputBox("New Project", "Project title:", "");
+                if (title) {
+                    result.action = PROPS_NEW_PROJECT;
+                    result.path = d;
+                    result.title = xstrdup(title);
+                } else {
+                    free(d);
+                }
+            }
+        }
+        if (nk_button_label(ctx, "Open Project...")) {
+            const char *patterns[1] = { "*.json" };
+            const char *file = tinyfd_openFileDialog("Open Project (project.json)", "", 1, patterns,
+                                                     "Codestellation project", 0);
+            if (file) {
+                result.action = PROPS_OPEN_PROJECT;
+                result.path = xstrdup(file);
+            }
+        }
+        if (nk_button_label(ctx, "Open Folder...")) {
             const char *dir = tinyfd_selectFolderDialog("Open Project Directory", NULL);
-            if (dir) picked = xstrdup(dir);
+            if (dir) {
+                result.action = PROPS_OPEN_FOLDER;
+                result.path = xstrdup(dir);
+            }
         }
 
         nk_layout_row_dynamic(ctx, 24, 1);
         nk_checkbox_label(ctx, "Show origin", show_origin);
-        nk_checkbox_label(ctx, "Canvas view (spike)", canvas_view);
 
         /* Notes live under Application Support -- easy to lose track of,
          * hence a direct way to get a copy somewhere you'll find it.
@@ -62,5 +90,5 @@ char *properties_panel_draw(struct nk_context *ctx, int *show_origin, int *canva
     }
     nk_end(ctx);
 
-    return picked;
+    return result;
 }

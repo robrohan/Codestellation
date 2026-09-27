@@ -29,6 +29,8 @@ add_executable(Codestellation
     common/thread.c
     graph/graph.c
     graph/graph_json.c
+    canvas/canvas_doc.c
+    canvas/project.c
     pipeline/walk.c
     pipeline/parse.c
     pipeline/resolve.c

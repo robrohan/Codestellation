@@ -29,15 +29,25 @@ struct nk_context;
  * actually picking a destination and copying the file, this just reports
  * the click.
  *
- * Returns a newly malloc'd path (caller frees) the one frame the Open
- * button was clicked and the native folder picker returned a real
- * selection -- NULL every other frame, including when the picker was
- * canceled. *out_bounds receives this frame's live window rect, same
- * convention as ui_panel_draw/note_compose_draw. */
-/* *canvas_view: the "Canvas view (spike)" checkbox, same int convention
- * as show_origin -- switches main.c between the 3D graph and the canvas
- * spike (canvas_view.h). */
-char *properties_panel_draw(struct nk_context *ctx, int *show_origin, int *canvas_view, bool has_notes,
-                             bool *out_export_clicked, PanelRect *out_bounds);
+ * *out_bounds receives this frame's live window rect, same convention as
+ * ui_panel_draw/note_compose_draw. */
+typedef enum {
+    PROPS_NONE,
+    PROPS_OPEN_FOLDER,   /* path: directory to build and explore in 3D */
+    PROPS_OPEN_PROJECT,  /* path: a project.json */
+    PROPS_NEW_PROJECT,   /* path: directory to create project.json in; title: its title */
+} PropsAction;
+
+/* What the user asked for this frame. The native dialogs (folder/file
+ * pickers, title prompt) run inside properties_panel_draw; path/title are
+ * malloc'd (caller frees) and NULL unless the action needs them. */
+typedef struct {
+    PropsAction action;
+    char *path;
+    char *title;
+} PropsResult;
+
+PropsResult properties_panel_draw(struct nk_context *ctx, int *show_origin, bool has_notes,
+                                  bool *out_export_clicked, PanelRect *out_bounds);
 
 #endif

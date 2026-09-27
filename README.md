@@ -74,14 +74,33 @@ Don't Run that build from Xcode -- launch the built `.app` directly
 ## Run
 
 ```
-./build/src/codemap-view              # then Properties > Open...
-./build/src/codemap-view graph.json   # or open a previously built graph
+./build/src/codemap-view                       # then use the Properties panel
+./build/src/codemap-view path/to/project.json  # open a system-map project
+./build/src/codemap-view graph.json            # or a previously built graph
 ```
 
-In the viewer: left-drag empty space to orbit, scroll to zoom, click a
-node to inspect its file in the right-hand panel, drag a node to
-reposition it (it stays put -- layout is computed once at load, not a
-continuous simulation). Esc to quit.
+**Projects (system maps).** Properties > New Project... makes a
+`project.json` (title, description, root canvas) plus `root.canvas` in a
+folder you pick. Canvases are standard [JSON Canvas](https://jsoncanvas.org)
+files, so Obsidian can open them too. On the canvas:
+
+- double-click empty space to add a box; double-click a box or edge to edit
+  it in the side panel (markdown for boxes, a label for edges, colours)
+- drag a box to move it, its bottom-right corner to resize, one of its side
+  dots to draw an edge to another box
+- shift+click a box containing `[[something.canvas]]` to go into that canvas
+  (created on first visit); the breadcrumb bar at the top walks back out
+- Delete/Backspace removes the selection; Esc closes the editor, clears the
+  selection, then goes up a level
+- scroll to zoom, drag empty space (or right/middle-drag) to pan
+
+Every change saves to the `.canvas` file automatically.
+
+**Folders (3D explorer).** Properties > Open Folder... builds a directory's
+dependency graph and shows it in 3D: left-drag empty space to orbit, scroll
+to zoom, right-click a node to inspect its file, drag a node to reposition
+it (it stays put -- layout is computed once at load, not a continuous
+simulation). Esc quits from here.
 
 Optional sanity check of a built graph (needs networkx), pointed at the
 cached `graph.json` in the project's Application Support folder:

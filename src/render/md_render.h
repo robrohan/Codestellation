@@ -24,4 +24,8 @@ void md_render_draw(struct nk_command_buffer *canvas, struct nk_rect r, const ch
  * would be unreadable. */
 void md_render_title(struct nk_command_buffer *canvas, struct nk_rect r, const char *markdown, float px);
 
+/* The same title as plain text into buf (always NUL-terminated). Returns
+ * its length; 0 if the markdown is blank. */
+int md_title_text(const char *markdown, char *buf, int cap);
+
 #endif

@@ -196,6 +196,33 @@ canvas "looks great". What the spike established, reusable in step 4:
 - Breadcrumb bar across canvas and 3D levels.
 - Grid background.
 
+**Status (2026-09-27): canvas parts done, directory links (4c) remaining.**
+Decisions made along the way:
+
+- There is a `project.json` after all (`src/canvas/project.c`): title,
+  description, root canvas, created date. It's there for export titles and
+  metadata later.
+- Gestures: **shift+click** goes into a box (Obsidian uses double-click for
+  editing, so double-click edits here too). Double-click on empty space adds
+  a box. Side dots draw edges, the bottom-right corner resizes,
+  Delete/Backspace removes the selection. Esc closes the editor, then clears
+  the selection, then goes up a level. Esc no longer quits while a project
+  is open.
+- Only boxes with a `[[x.canvas]]` link (or a file node pointing at a
+  `.canvas`) can be gone into; a missing target is created on first visit.
+  Auto-creating a canvas for a box without a link was offered and declined.
+- Canvas I/O is in `src/canvas/canvas_doc.c`: keys the spec doesn't define
+  are dropped on save, writes are atomic (temp file + rename), and a file
+  that fails to parse is shown empty and never overwritten.
+- `vendor/nuklear/nuklear_glfw_gl3.h` is patched so Cmd works as the
+  shortcut key on macOS (copy/paste in the editor).
+- Known gaps: no undo; the editor doesn't word-wrap (a Nuklear limitation).
+
+**4c, next:** directory `[[links]]` open the 3D explorer, with several
+folders merged into one graph (`walk_project` over each root into one
+FileList, cached under a hash of the sorted folder set), and a `[code]`
+breadcrumb to get back to the canvas.
+
 ### 5. Search + weak links
 
 Global search panel over all canvases; drop weak-link nodes from results;
