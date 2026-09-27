@@ -99,6 +99,103 @@ void canvas_doc_remove_node(CanvasDoc *doc, size_t index) {
     doc->node_count--;
 }
 
+static bool ends_with_ci(const char *s, size_t n, const char *suffix) {
+    size_t m = strlen(suffix);
+    if (n < m) return false;
+    for (size_t i = 0; i < m; i++) {
+        char a = s[n - m + i], b = suffix[i];
+        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+        if (a != b) return false;
+    }
+    return true;
+}
+
+int canvas_text_title(const char *md, char *buf, int cap) {
+    if (cap <= 0) return 0;
+    const char *p = md ? md : "";
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    const char *eol = strchr(p, '\n');
+    int n = eol ? (int)(eol - p) : (int)strlen(p);
+
+    int o = 0, i = 0;
+    while (i < n && p[i] == '#') i++;
+    if (i < n && (p[i] == '-' || p[i] == '*') && i + 1 < n && p[i + 1] == ' ') i += 2;
+    while (i < n && p[i] == ' ') i++;
+    for (; i < n && o < cap - 1; i++) {
+        char c = p[i];
+        if (c == '*' || c == '`' || c == '[' || c == ']' || c == '\r') continue;
+        buf[o++] = c;
+    }
+    /* Don't leave half a UTF-8 sequence at a truncation point. */
+    if (i < n) {
+        while (o > 0 && ((unsigned char)buf[o - 1] & 0xC0) == 0x80) o--;
+        if (o > 0 && ((unsigned char)buf[o - 1] & 0xC0) == 0xC0) o--;
+    }
+    buf[o] = '\0';
+    return o;
+}
+
+static int copy_title(const char *s, char *buf, int cap) {
+    if (cap <= 0) return 0;
+    int n = 0;
+    for (; s && s[n] && n < cap - 1; n++) buf[n] = s[n];
+    buf[n] = '\0';
+    return n;
+}
+
+int canvas_node_title(const CanvasNode *n, char *buf, int cap) {
+    switch (n->type) {
+        case CNODE_TEXT: return canvas_text_title(n->text, buf, cap);
+        case CNODE_FILE: {
+            const char *f = n->file ? n->file : "";
+            const char *slash = strrchr(f, '/');
+            return copy_title(slash ? slash + 1 : f, buf, cap);
+        }
+        case CNODE_LINK: return copy_title(n->url, buf, cap);
+        case CNODE_GROUP: return copy_title(n->label, buf, cap);
+    }
+    return 0;
+}
+
+bool canvas_node_is_weak_link(const CanvasNode *n) {
+    return n->type == CNODE_FILE && n->file && n->subpath && n->subpath[0] == '#' && n->subpath[1] &&
+           ends_with_ci(n->file, strlen(n->file), ".canvas");
+}
+
+static void push_str(char ***out, size_t *count, size_t *cap, const char *s, size_t len) {
+    if (*count == *cap) {
+        *cap = *cap ? *cap * 2 : 4;
+        *out = (char **)realloc(*out, *cap * sizeof(char *));
+    }
+    char *copy = (char *)malloc(len + 1);
+    memcpy(copy, s, len);
+    copy[len] = '\0';
+    (*out)[(*count)++] = copy;
+}
+
+size_t canvas_node_canvas_links(const CanvasNode *n, char ***out) {
+    *out = NULL;
+    size_t count = 0, cap = 0;
+    if (n->type == CNODE_FILE) {
+        if (n->file && !canvas_node_is_weak_link(n) && ends_with_ci(n->file, strlen(n->file), ".canvas")) {
+            push_str(out, &count, &cap, n->file, strlen(n->file));
+        }
+        return count;
+    }
+    if (n->type != CNODE_TEXT || !n->text) return 0;
+    const char *p = n->text;
+    while ((p = strstr(p, "[[")) != NULL) {
+        p += 2;
+        const char *end = strstr(p, "]]");
+        if (!end) break;
+        size_t len = 0;
+        while (p + len < end && p[len] != '|' && p[len] != '#') len++;
+        if (ends_with_ci(p, len, ".canvas")) push_str(out, &count, &cap, p, len);
+        p = end + 2;
+    }
+    return count;
+}
+
 int canvas_doc_find_node(const CanvasDoc *doc, const char *id) {
     if (!id) return -1;
     for (size_t i = 0; i < doc->node_count; i++) {

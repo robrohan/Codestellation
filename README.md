@@ -95,8 +95,14 @@ files, so Obsidian can open them too. On the canvas:
   folders are merged into one graph; Esc or a breadcrumb returns to the
   canvas. A box with both kinds goes into the canvas; its editor has an
   "Open code" button
-- Delete/Backspace removes the selection; Esc closes the editor, clears the
-  selection, then goes up a level
+- Cmd+F (Ctrl+F elsewhere) or the breadcrumb bar's Search button searches
+  every canvas in the project. **Go** jumps to a result; **Link here** drops a
+  *weak link* on the current canvas: a dashed, read-only box showing the
+  original's live text, which you can connect edges to (e.g. a server in one
+  region talking to a database in another). Shift+click a weak link to jump
+  to the original
+- Delete/Backspace removes the selection; Esc closes search or the editor,
+  clears the selection, then goes up a level
 - scroll to zoom, drag empty space (or right/middle-drag) to pan
 
 Every change saves to the `.canvas` file automatically.

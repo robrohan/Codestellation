@@ -13,6 +13,7 @@
 #include "theme.h"
 #include "../canvas/canvas_doc.h"
 #include "../canvas/project.h"
+#include "../canvas/canvas_index.h"
 #include "../common/pathutil.h"
 #include "tinyfiledialogs.h"
 #include <math.h>
@@ -41,6 +42,9 @@
 #define EDITOR_TITLE "Edit"
 #define CRUMBS_TITLE "##breadcrumbs"
 #define EDIT_BUF_SIZE 32768
+#define SEARCH_TITLE "Search"
+#define SEARCH_MAX 200
+#define REF_CACHE 16
 
 typedef enum { SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM, SIDE_LEFT, SIDE_AUTO } Side;
 typedef enum { MODE_NONE, MODE_PAN, MODE_DRAG, MODE_RESIZE, MODE_CONNECT } Mode;
@@ -108,6 +112,37 @@ static char **g_code_req_dirs = NULL;
 static size_t g_code_req_count = 0;
 static char *g_code_req_title = NULL;
 
+/* Last window size seen by update -- for centring on a jumped-to box. */
+static int g_view_w = 1280, g_view_h = 800;
+
+/* Every reachable canvas and box (canvas_index.h), built on demand and
+ * rebuilt each time search opens. */
+static CanvasIndex g_index;
+static bool g_index_built = false;
+
+static bool g_search_open = false;
+static bool g_search_focus_pending = false;
+static bool g_search_active = false;   /* query field has focus */
+static char g_search_buf[256];
+static char g_search_last[256];
+static size_t g_results[SEARCH_MAX];
+static size_t g_result_count = 0;
+static long g_pending_jump_entry = -1;
+static long g_pending_link_entry = -1;
+static int g_pending_jump_original = -1;
+
+/* Other canvases that weak links on the current one point into, loaded
+ * lazily and dropped whenever a canvas loads. Keyed on the link's file
+ * string as written, which is unambiguous per canvas. */
+typedef struct {
+    char *raw;
+    char *path;
+    bool ok;
+    CanvasDoc doc;
+} RefDoc;
+static RefDoc g_refs[REF_CACHE];
+static int g_ref_count = 0;
+
 /* ---- small helpers ------------------------------------------------------ */
 
 static const char *cur_path(void) { return g_nav[g_depth - 1].path; }
@@ -153,30 +188,16 @@ static bool ends_with_ci(const char *s, size_t n, const char *suffix) {
     return true;
 }
 
-/* The first link on this node to another canvas: a [[x.canvas]] in a text
- * node (alias after '|' and heading after '#' ignored), or a file node
- * pointing at a .canvas. malloc'd; NULL if there isn't one. */
+/* The canvas shift+click goes into: the node's first canvas link (see
+ * canvas_node_canvas_links -- weak links don't count). malloc'd; NULL if
+ * there isn't one. */
 static char *canvas_link_of(const CanvasNode *n) {
-    if (n->type == CNODE_FILE && n->file && ends_with_ci(n->file, strlen(n->file), ".canvas")) {
-        return xstrdup(n->file);
-    }
-    if (n->type != CNODE_TEXT || !n->text) return NULL;
-    const char *p = n->text;
-    while ((p = strstr(p, "[[")) != NULL) {
-        p += 2;
-        const char *end = strstr(p, "]]");
-        if (!end) break;
-        size_t len = 0;
-        while (p + len < end && p[len] != '|' && p[len] != '#') len++;
-        if (ends_with_ci(p, len, ".canvas")) {
-            char *out = (char *)malloc(len + 1);
-            memcpy(out, p, len);
-            out[len] = '\0';
-            return out;
-        }
-        p = end + 2;
-    }
-    return NULL;
+    char **links;
+    size_t count = canvas_node_canvas_links(n, &links);
+    char *first = count ? links[0] : NULL;
+    for (size_t i = 1; i < count; i++) free(links[i]);
+    free(links);
+    return first;
 }
 
 /* The existing folders this node links to -- [[targets]] in a text node
@@ -297,6 +318,20 @@ static char *crumb_title_for(const CanvasNode *n, const char *link) {
     return out;
 }
 
+static void clear_refs(void) {
+    for (int i = 0; i < g_ref_count; i++) {
+        free(g_refs[i].raw);
+        free(g_refs[i].path);
+        canvas_doc_free(&g_refs[i].doc);
+    }
+    g_ref_count = 0;
+}
+
+static void invalidate_index(void) {
+    if (g_index_built) canvas_index_free(&g_index);
+    g_index_built = false;
+}
+
 /* ---- saving and navigation ---------------------------------------------- */
 
 static void mark_dirty(void) {
@@ -322,6 +357,7 @@ static void load_current(void) {
     canvas_doc_free(&g_doc);
     g_load_failed = !canvas_doc_read(cur_path(), &g_doc);
     clear_dir_cache();
+    clear_refs();
     if (g_load_failed) fprintf(stderr, "warning: could not read %s -- showing it empty, not saving\n", cur_path());
     clear_selection();
     g_mode = MODE_NONE;
@@ -368,9 +404,149 @@ static void pop_to(int index) {
     }
     g_depth = index + 1;
     load_current();
-    g_zoom = g_nav[index].zoom;
-    g_ox = g_nav[index].ox;
-    g_oy = g_nav[index].oy;
+    /* zoom 0: a level that was never viewed (pushed by a jump) -- fit it. */
+    if (g_nav[index].zoom > 0.0f) {
+        g_zoom = g_nav[index].zoom;
+        g_ox = g_nav[index].ox;
+        g_oy = g_nav[index].oy;
+    } else {
+        g_fit_pending = true;
+    }
+}
+
+static void ensure_index(void) {
+    if (g_index_built) return;
+    flush(); /* the index reads from disk */
+    canvas_index_build(&g_index, g_nav[0].path, g_nav[0].title);
+    g_index_built = true;
+}
+
+static void push_level(const char *path, const char *title) {
+    if (g_depth >= MAX_DEPTH) return;
+    g_nav[g_depth].path = xstrdup(path);
+    g_nav[g_depth].title = xstrdup(title);
+    g_nav[g_depth].zoom = 0.0f;
+    g_depth++;
+}
+
+static void center_on_node(int i) {
+    const CanvasNode *n = &g_doc.nodes[i];
+    g_ox = (float)g_view_w * 0.5f - (n->x + n->w * 0.5f) * g_zoom;
+    g_oy = (float)g_view_h * 0.5f - (n->y + n->h * 0.5f) * g_zoom;
+    g_sel = SEL_NODE;
+    g_sel_index = i;
+    g_editor_open = false;
+}
+
+/* Shows node_id on the canvas at canvas_path, rebuilding the breadcrumb
+ * trail to it from the index (its shortest route from the root). */
+static void jump_to(const char *canvas_path, const char *node_id) {
+    if (strcmp(canvas_path, cur_path()) != 0) {
+        ensure_index();
+        int chain[MAX_DEPTH];
+        int len = 0;
+        int ci = canvas_index_find_canvas(&g_index, canvas_path);
+        for (int c = ci; c >= 0 && len < MAX_DEPTH; c = g_index.canvases[c].parent) chain[len++] = c;
+
+        flush();
+        save_view();
+        for (int i = 1; i < g_depth; i++) {
+            free(g_nav[i].path);
+            free(g_nav[i].title);
+        }
+        g_depth = 1;
+        if (ci >= 0) {
+            /* chain runs target -> root; the root is already g_nav[0]. */
+            for (int k = len - 2; k >= 0; k--) push_level(g_index.canvases[chain[k]].path, g_index.canvases[chain[k]].title);
+        } else if (strcmp(canvas_path, g_nav[0].path) != 0) {
+            /* Not reachable from the root (a weak link into some other
+             * canvas): one hop, named after the file. */
+            const char *base = strrchr(canvas_path, '/');
+            push_level(canvas_path, base ? base + 1 : canvas_path);
+        }
+        load_current();
+        g_zoom = 1.0f;
+    }
+    int idx = canvas_doc_find_node(&g_doc, node_id);
+    if (idx >= 0) center_on_node(idx);
+    else g_fit_pending = true;
+}
+
+/* The box a weak link references, or NULL if it's gone. The pointer is
+ * only good until the next canvas load. */
+static const CanvasNode *weak_target(const CanvasNode *n) {
+    const CanvasDoc *doc = NULL;
+    RefDoc *ref = NULL;
+    for (int i = 0; i < g_ref_count && !ref; i++) {
+        if (strcmp(g_refs[i].raw, n->file) == 0) ref = &g_refs[i];
+    }
+    if (!ref) {
+        if (g_ref_count == REF_CACHE) clear_refs();
+        ref = &g_refs[g_ref_count++];
+        ref->raw = xstrdup(n->file);
+        ref->path = project_resolve_link(cur_path(), n->file);
+        /* A link back into this same canvas reads the live doc instead. */
+        ref->ok = strcmp(ref->path, cur_path()) != 0 && canvas_doc_read(ref->path, &ref->doc);
+        if (!ref->ok) canvas_doc_init(&ref->doc);
+    }
+    if (strcmp(ref->path, cur_path()) == 0) doc = &g_doc;
+    else if (ref->ok) doc = &ref->doc;
+    int idx = doc ? canvas_doc_find_node(doc, n->subpath + 1) : -1;
+    return idx >= 0 ? &doc->nodes[idx] : NULL;
+}
+
+/* Label for the canvas a weak link points into: its crumb title when the
+ * index knows it, else the file name without ".canvas". */
+static void weak_canvas_label(const CanvasNode *n, char *buf, size_t cap) {
+    const char *base = strrchr(n->file, '/');
+    base = base ? base + 1 : n->file;
+    snprintf(buf, cap, "%s", base);
+    size_t len = strlen(buf);
+    if (len > 7 && strcmp(buf + len - 7, ".canvas") == 0) buf[len - 7] = '\0';
+    if (!g_index_built) return;
+    char *path = project_resolve_link(cur_path(), n->file);
+    int ci = canvas_index_find_canvas(&g_index, path);
+    free(path);
+    if (ci >= 0) snprintf(buf, cap, "%s", g_index.canvases[ci].title);
+}
+
+static void jump_to_original(int node_index) {
+    const CanvasNode *n = &g_doc.nodes[node_index];
+    char *path = project_resolve_link(cur_path(), n->file);
+    char *id = xstrdup(n->subpath + 1);
+    if (path_exists(path)) {
+        jump_to(path, id);
+    } else {
+        char msg[4200];
+        snprintf(msg, sizeof(msg), "The referenced canvas no longer exists:\n%s", path);
+        tinyfd_messageBox("Codestellation", msg, "ok", "warning", 1);
+    }
+    free(path);
+    free(id);
+}
+
+/* Drops a weak link to search result `entry` in the middle of the view. */
+static void add_weak_link(size_t entry) {
+    ensure_index();
+    if (entry >= g_index.entry_count) return;
+    const IndexEntry *e = &g_index.entries[entry];
+    char *dir = path_dirname(cur_path());
+    char *rel = path_relative(dir, g_index.canvases[e->canvas].path);
+    free(dir);
+    size_t id_len = strlen(e->node_id);
+    char *sub = (char *)malloc(id_len + 2);
+    sub[0] = '#';
+    memcpy(sub + 1, e->node_id, id_len + 1);
+
+    CanvasNode *n = canvas_doc_add_node(&g_doc, CNODE_FILE);
+    n->file = rel;
+    n->subpath = sub;
+    n->w = 280.0f;
+    n->h = 160.0f;
+    n->x = roundf(((float)g_view_w * 0.5f - g_ox) / g_zoom - n->w * 0.5f);
+    n->y = roundf(((float)g_view_h * 0.5f - g_oy) / g_zoom - n->h * 0.5f);
+    mark_dirty();
+    center_on_node((int)g_doc.node_count - 1);
 }
 
 /* Queues node n's folders for main.c to build and show in 3D. */
@@ -397,6 +573,10 @@ static void request_code(int node_index) {
 static void go_into(int node_index) {
     if (node_index < 0 || node_index >= (int)g_doc.node_count) return;
     const CanvasNode *n = &g_doc.nodes[node_index];
+    if (canvas_node_is_weak_link(n)) {
+        jump_to_original(node_index);
+        return;
+    }
     char *link = canvas_link_of(n);
     if (!link) {
         request_code(node_index);
@@ -478,6 +658,10 @@ void canvas_view_close(void) {
     g_code_req_count = 0;
     free(g_code_req_title);
     g_code_req_title = NULL;
+    invalidate_index();
+    clear_refs();
+    g_search_open = false;
+    g_search_active = false;
 }
 
 bool canvas_view_is_open(void) { return g_open; }
@@ -509,10 +693,25 @@ static void leave_code(void) {
     g_code_title = NULL;
 }
 
+void canvas_view_open_search(void) {
+    if (!g_open || g_in_code) return;
+    /* Fresh index each time, so edits since the last search show up. */
+    invalidate_index();
+    ensure_index();
+    g_search_last[0] = '\x01'; /* force a re-run of the current query */
+    g_search_open = true;
+    g_search_focus_pending = true;
+}
+
 void canvas_view_escape(void) {
     if (!g_open) return;
     if (g_in_code) {
         leave_code();
+        return;
+    }
+    if (g_search_open) {
+        g_search_open = false;
+        g_search_active = false;
         return;
     }
     if (g_editor_open || g_sel != SEL_NONE) {
@@ -768,9 +967,30 @@ void canvas_view_update(const CanvasInput *in, int width, int height) {
         g_prev_middle = in->middle;
         return;
     }
+    g_view_w = width;
+    g_view_h = height;
     if (g_pending_go_into >= 0) {
         go_into(g_pending_go_into);
         g_pending_go_into = -1;
+    }
+    if (g_pending_jump_original >= 0) {
+        if (g_pending_jump_original < (int)g_doc.node_count) jump_to_original(g_pending_jump_original);
+        g_pending_jump_original = -1;
+    }
+    if (g_pending_jump_entry >= 0) {
+        if ((size_t)g_pending_jump_entry < g_index.entry_count) {
+            const IndexEntry *e = &g_index.entries[g_pending_jump_entry];
+            char *path = xstrdup(g_index.canvases[e->canvas].path);
+            char *id = xstrdup(e->node_id);
+            jump_to(path, id);
+            free(path);
+            free(id);
+        }
+        g_pending_jump_entry = -1;
+    }
+    if (g_pending_link_entry >= 0) {
+        add_weak_link((size_t)g_pending_link_entry);
+        g_pending_link_entry = -1;
     }
     if (g_pending_open_code >= 0) {
         request_code(g_pending_open_code);
@@ -806,7 +1026,7 @@ void canvas_view_update(const CanvasInput *in, int width, int height) {
         if (g_hover < 0 && !in->over_panel && hit_handle(prev, in->mx, in->my, &unused)) g_hover = prev;
     }
 
-    if (in->key_delete && !g_edit_active && g_sel != SEL_NONE) delete_selection();
+    if (in->key_delete && !g_edit_active && !g_search_active && g_sel != SEL_NONE) delete_selection();
 
     bool left_edge = in->left && !g_prev_left;
     bool pan_edge = (in->right && !g_prev_right) || (in->middle && !g_prev_middle);
@@ -1001,11 +1221,84 @@ static void draw_group(struct nk_command_buffer *c, int i, struct nk_rect window
     }
 }
 
+/* Nuklear has no dashed strokes; weak links draw their outline in segments. */
+static void stroke_dashed_rect(struct nk_command_buffer *c, struct nk_rect r, float thick, struct nk_color col) {
+    const float dash = 7.0f, gap = 5.0f;
+    const float xs[4][4] = {
+        { r.x, r.y, r.x + r.w, r.y },
+        { r.x + r.w, r.y, r.x + r.w, r.y + r.h },
+        { r.x + r.w, r.y + r.h, r.x, r.y + r.h },
+        { r.x, r.y + r.h, r.x, r.y },
+    };
+    for (int s = 0; s < 4; s++) {
+        float x0 = xs[s][0], y0 = xs[s][1], x1 = xs[s][2], y1 = xs[s][3];
+        float len = sqrtf((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
+        if (len < 1.0f) continue;
+        float ux = (x1 - x0) / len, uy = (y1 - y0) / len;
+        for (float t = 0.0f; t < len; t += dash + gap) {
+            float t1 = fminf(t + dash, len);
+            nk_stroke_line(c, x0 + ux * t, y0 + uy * t, x0 + ux * t1, y0 + uy * t1, thick, col);
+        }
+    }
+}
+
+/* A weak link: dashed outline, a "→ canvas" header, and the referenced
+ * box's live text (read-only). */
+static void draw_weak_link(struct nk_command_buffer *c, int i, struct nk_rect r, struct nk_rect window_clip) {
+    const CanvasNode *n = &g_doc.nodes[i];
+    const CanvasNode *t = weak_target(n);
+    ThemeColor border = g_theme.box_border;
+    if (!node_color(n->color, &border) && t) node_color(t->color, &border);
+    nk_fill_rect(c, r, 0.0f, theme_nk(g_theme.box_fill));
+    stroke_dashed_rect(c, r, 2.0f, theme_nk(border));
+    if (g_sel == SEL_NODE && g_sel_index == i) {
+        struct nk_rect o = nk_rect(r.x - 3.0f, r.y - 3.0f, r.w + 6.0f, r.h + 6.0f);
+        nk_stroke_rect(c, o, 3.0f, 1.5f, theme_nk(g_theme.box_border_selected));
+    }
+
+    float pad = BOX_PAD * g_zoom;
+    struct nk_rect inner = nk_rect(r.x + pad, r.y + pad, r.w - pad * 2.0f, r.h - pad * 2.0f);
+    if (inner.w <= 4.0f || inner.h <= 4.0f) return;
+    push_clip(c, r, window_clip);
+
+    char label[96], header[128];
+    weak_canvas_label(n, label, sizeof(label));
+    snprintf(header, sizeof(header), "\xE2\x86\x92 %s", label);
+    const char *body = t ? (t->type == CNODE_TEXT ? t->text : NULL) : NULL;
+    char fallback[160];
+    if (t && !body) {
+        canvas_node_title(t, fallback, (int)sizeof(fallback));
+        body = fallback;
+    } else if (!t) {
+        body = "*The referenced box no longer exists.*";
+    }
+
+    if (14.0f * g_zoom >= MIN_BODY_PX) {
+        float hpx = 11.0f * g_zoom;
+        const struct nk_user_font *hf = fonts_sized(FONT_REGULAR, hpx);
+        nk_draw_text(c, nk_rect(inner.x, inner.y, inner.w, hf->height), header, (int)strlen(header), hf,
+                     nk_rgba(0, 0, 0, 0), theme_nk(g_theme.box_link));
+        float dy = hf->height * 1.6f;
+        md_render_draw(c, nk_rect(inner.x, inner.y + dy, inner.w, inner.h - dy), body, g_zoom);
+    } else {
+        float px = fmaxf(22.0f * g_zoom, 11.0f);
+        float tpad = fminf(pad, 4.0f);
+        struct nk_rect tr = nk_rect(r.x + tpad, r.y + tpad, r.w - tpad * 2.0f, r.h - tpad * 2.0f);
+        if (tr.h >= px && tr.w >= 24.0f) md_render_title(c, tr, body, px);
+    }
+    nk_push_scissor(c, window_clip);
+}
+
 static void draw_box(struct nk_command_buffer *c, int i, struct nk_rect window_clip) {
     const CanvasNode *n = &g_doc.nodes[i];
     struct nk_rect r = rect_of(n);
     if (r.x > window_clip.x + window_clip.w || r.y > window_clip.y + window_clip.h ||
         r.x + r.w < window_clip.x || r.y + r.h < window_clip.y) return;
+
+    if (canvas_node_is_weak_link(n)) {
+        draw_weak_link(c, i, r, window_clip);
+        return;
+    }
 
     float rounding = 6.0f * fminf(g_zoom, 1.5f);
     ThemeColor border = g_theme.box_border;
@@ -1139,8 +1432,14 @@ static void draw_canvas_layer(struct nk_context *ctx, int width, int height) {
         char hud[160];
         snprintf(hud, sizeof(hud),
                  "%.0f%%   \xC2\xB7   double-click: add / edit   \xC2\xB7   shift+click: go in / open code   "
-                 "\xC2\xB7   Esc: up",
-                 g_zoom * 100.0f);
+                 "\xC2\xB7   %s+F: search   \xC2\xB7   Esc: up",
+                 g_zoom * 100.0f,
+#ifdef __APPLE__
+                 "Cmd"
+#else
+                 "Ctrl"
+#endif
+        );
         float fh = fonts_ui()->height;
         draw_text_at(c, 12.0f, (float)height - fh - 12.0f, hud, g_theme.canvas_edge_label);
         if (g_load_failed) {
@@ -1173,6 +1472,9 @@ static void draw_breadcrumbs(struct nk_context *ctx, int width, PanelRect *out) 
         total += widths[i];
         if (i) total += sep_w + spacing * 2.0f;
     }
+    const float search_w = 64.0f;
+    bool show_search = !g_in_code;
+    if (show_search) total += search_w + 10.0f + spacing;
     float bw = total + pad.x * 2.0f + 6.0f;
     float bh = row_h + pad.y * 2.0f + 4.0f;
     struct nk_rect bounds = nk_rect(((float)width - bw) * 0.5f, 10.0f, bw, bh);
@@ -1181,7 +1483,7 @@ static void draw_breadcrumbs(struct nk_context *ctx, int width, PanelRect *out) 
     if (nk_begin(ctx, CRUMBS_TITLE, bounds, NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR)) {
         struct nk_rect b = nk_window_get_bounds(ctx);
         *out = (PanelRect){ b.x, b.y, b.w, b.h };
-        nk_layout_row_begin(ctx, NK_STATIC, row_h, crumbs * 2 - 1);
+        nk_layout_row_begin(ctx, NK_STATIC, row_h, crumbs * 2 - 1 + (show_search ? 2 : 0));
         for (int i = 0; i < crumbs; i++) {
             if (i) {
                 nk_layout_row_push(ctx, sep_w);
@@ -1193,6 +1495,12 @@ static void draw_breadcrumbs(struct nk_context *ctx, int width, PanelRect *out) 
             } else if (nk_button_label(ctx, labels[i])) {
                 g_pending_crumb = i;
             }
+        }
+        if (show_search) {
+            nk_layout_row_push(ctx, 10.0f);
+            nk_spacing(ctx, 1);
+            nk_layout_row_push(ctx, search_w);
+            if (nk_button_label(ctx, "Search")) canvas_view_open_search();
         }
         nk_layout_row_end(ctx);
     }
@@ -1209,12 +1517,31 @@ static void draw_editor(struct nk_context *ctx, int width, int height, PanelRect
     }
     bool is_edge = g_sel == SEL_EDGE;
     CanvasNode *node = is_edge ? NULL : &g_doc.nodes[g_sel_index];
+    bool weak = node && canvas_node_is_weak_link(node);
 
     struct nk_rect initial = nk_rect((float)width - 460.0f, 60.0f, 440.0f, fmaxf((float)height - 120.0f, 300.0f));
     if (nk_begin(ctx, EDITOR_TITLE, initial,
                  NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE)) {
         struct nk_rect b = nk_window_get_bounds(ctx);
         *out = (PanelRect){ b.x, b.y, b.w, b.h };
+
+        if (weak) {
+            /* Weak links aren't edited -- the text belongs to the original. */
+            char label[96], msg[160];
+            weak_canvas_label(node, label, sizeof(label));
+            snprintf(msg, sizeof(msg), "Reference to a box on \xE2\x80\x9C%s\xE2\x80\x9D", label);
+            nk_layout_row_dynamic(ctx, 20, 1);
+            nk_label(ctx, msg, NK_TEXT_LEFT);
+            nk_label(ctx, weak_target(node) ? "Edit the original to change its text."
+                                            : "The referenced box no longer exists.", NK_TEXT_LEFT);
+            nk_layout_row_dynamic(ctx, 26, 3);
+            if (nk_button_label(ctx, "Jump to original")) g_pending_jump_original = g_sel_index;
+            if (nk_button_label(ctx, "Delete")) g_pending_delete = true;
+            if (nk_button_label(ctx, "Close")) g_editor_open = false;
+            g_edit_active = false;
+            nk_end(ctx);
+            return;
+        }
 
         const char *what = is_edge ? "Edge label"
                          : node->type == CNODE_TEXT ? "Markdown"
@@ -1278,11 +1605,80 @@ static void draw_editor(struct nk_context *ctx, int width, int height, PanelRect
     nk_end(ctx);
 }
 
-void canvas_view_draw(struct nk_context *ctx, int width, int height, PanelRect *out_crumbs, PanelRect *out_editor) {
-    *out_crumbs = (PanelRect){ 0, 0, 0, 0 };
-    *out_editor = (PanelRect){ 0, 0, 0, 0 };
+/* "in Root › A › B" for a result's canvas. */
+static void result_trail(int canvas, char *buf, size_t cap) {
+    int chain[MAX_DEPTH];
+    int len = 0;
+    for (int c = canvas; c >= 0 && len < MAX_DEPTH; c = g_index.canvases[c].parent) chain[len++] = c;
+    size_t o = (size_t)snprintf(buf, cap, "in ");
+    for (int k = len - 1; k >= 0 && o < cap; k--) {
+        o += (size_t)snprintf(buf + o, cap - o, "%s%s", g_index.canvases[chain[k]].title, k ? " \xE2\x80\xBA " : "");
+    }
+}
+
+static void draw_search(struct nk_context *ctx, int width, int height, PanelRect *out) {
+    if (!g_search_open) {
+        g_search_active = false;
+        *out = (PanelRect){ 0, 0, 0, 0 };
+        return;
+    }
+    struct nk_rect initial = nk_rect((float)width * 0.5f - 280.0f, 64.0f, 560.0f, fminf((float)height - 120.0f, 480.0f));
+    if (nk_begin(ctx, SEARCH_TITLE, initial,
+                 NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE)) {
+        struct nk_rect b = nk_window_get_bounds(ctx);
+        *out = (PanelRect){ b.x, b.y, b.w, b.h };
+
+        nk_layout_row_dynamic(ctx, 28, 1);
+        if (g_search_focus_pending) {
+            nk_edit_focus(ctx, 0);
+            g_search_focus_pending = false;
+        }
+        nk_flags state = nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD | NK_EDIT_SIG_ENTER, g_search_buf,
+                                                        (int)sizeof(g_search_buf), nk_filter_default);
+        g_search_active = (state & NK_EDIT_ACTIVE) != 0;
+        if (strcmp(g_search_buf, g_search_last) != 0) {
+            ensure_index();
+            g_result_count = canvas_index_search(&g_index, g_search_buf, g_results, SEARCH_MAX);
+            snprintf(g_search_last, sizeof(g_search_last), "%s", g_search_buf);
+        }
+        if ((state & NK_EDIT_COMMITED) && g_result_count > 0) g_pending_jump_entry = (long)g_results[0];
+
+        nk_layout_row_dynamic(ctx, 18, 1);
+        char count[64];
+        if (!g_search_buf[0]) snprintf(count, sizeof(count), "Type to search every canvas (Enter jumps to the first)");
+        else snprintf(count, sizeof(count), "%zu result%s%s", g_result_count, g_result_count == 1 ? "" : "s",
+                      g_result_count == SEARCH_MAX ? " (showing the first 200)" : "");
+        nk_label_colored(ctx, count, NK_TEXT_LEFT, theme_nk(g_theme.canvas_edge_label));
+
+        for (size_t k = 0; k < g_result_count; k++) {
+            const IndexEntry *e = &g_index.entries[g_results[k]];
+            nk_layout_row_begin(ctx, NK_DYNAMIC, 24, 3);
+            nk_layout_row_push(ctx, 0.62f);
+            nk_label(ctx, e->title[0] ? e->title : "(untitled)", NK_TEXT_LEFT);
+            nk_layout_row_push(ctx, 0.14f);
+            if (nk_button_label(ctx, "Go")) g_pending_jump_entry = (long)g_results[k];
+            nk_layout_row_push(ctx, 0.22f);
+            if (nk_button_label(ctx, "Link here")) g_pending_link_entry = (long)g_results[k];
+            nk_layout_row_end(ctx);
+
+            char trail[256];
+            result_trail(e->canvas, trail, sizeof(trail));
+            nk_layout_row_dynamic(ctx, 16, 1);
+            nk_label_colored(ctx, trail, NK_TEXT_LEFT, theme_nk(g_theme.canvas_edge_label));
+        }
+    }
+    nk_end(ctx);
+}
+
+void canvas_view_draw(struct nk_context *ctx, int width, int height, CanvasPanels *out) {
+    out->crumbs = out->editor = out->search = (PanelRect){ 0, 0, 0, 0 };
     if (!g_open) return;
     if (!g_in_code) draw_canvas_layer(ctx, width, height);
-    draw_breadcrumbs(ctx, width, out_crumbs);
-    if (!g_in_code) draw_editor(ctx, width, height, out_editor);
+    draw_breadcrumbs(ctx, width, &out->crumbs);
+    if (!g_in_code) {
+        draw_editor(ctx, width, height, &out->editor);
+        draw_search(ctx, width, height, &out->search);
+    } else {
+        g_search_active = false;
+    }
 }

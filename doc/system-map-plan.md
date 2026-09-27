@@ -236,6 +236,27 @@ huge trees); reusing the cache is a possible later improvement.
 Global search panel over all canvases; drop weak-link nodes from results;
 click a weak link to jump to its original box.
 
+**Status (2026-09-27): done.**
+
+- `src/canvas/canvas_index.c`: breadth-first walk of canvas links from the
+  root, so search covers exactly the canvases reachable in the project (even
+  ones outside its folder), and each canvas gets its shortest breadcrumb
+  trail. Cycles and self-links are handled. It reads from disk, so pending
+  edits are flushed first, and it's rebuilt each time search opens.
+- Search: Cmd/Ctrl+F or a Search button on the breadcrumb bar.
+  Case-insensitive substring over every box's full text. Enter jumps to the
+  first result. Each result has **Go** and **Link here**.
+- Jumping rebuilds the breadcrumb trail from the index. Levels pushed that
+  way have never been viewed, so they fit to their content when you walk back
+  up (a saved zoom of 0 means "fit").
+- Weak links are standard file nodes, `file` relative to the containing
+  canvas (`path_relative`) with `subpath: "#<node id>"`. They're drawn with a
+  dashed border, a "→ canvas" header and the target's live text. Target
+  canvases are loaded lazily and cached per canvas load. Shift+click, or
+  "Jump to original" in the editor, goes to the target. They're excluded
+  from search results so they don't duplicate their originals, and they
+  don't count as nesting in the index.
+
 ### 6. Later
 
 - ~~Colour/readability polish~~ (done in step 2).
@@ -244,6 +265,10 @@ click a weak link to jump to its original box.
   preview back to the top of the file. It should stay on that line, since
   the surrounding code is context for the note.
 - Source preview font is a bit small (`MONO_UI_SIZE` in `fonts.c`).
+- Stable code layouts: today only dragged nodes are saved
+  (`graph.overlay.json`) and everything else is laid out fresh on each load,
+  so the picture shifts when files are added. Option: save every node's
+  position and lay out only new files.
 - Reuse the cached code graph instead of rebuilding on every shift+click,
   with an explicit Rebuild. Deferred until rebuild time is an actual problem
   (the user's call).

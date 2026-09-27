@@ -66,6 +66,26 @@ CanvasEdge *canvas_doc_add_edge(CanvasDoc *doc);
 void canvas_doc_remove_node(CanvasDoc *doc, size_t index);
 void canvas_doc_remove_edge(CanvasDoc *doc, size_t index);
 
+/* A node's display title into buf (always NUL-terminated), returning its
+ * length: a text node's first non-blank line with markdown markers
+ * stripped, a file node's file name, a link's URL, a group's label. */
+int canvas_node_title(const CanvasNode *n, char *buf, int cap);
+
+/* Just the markdown part of the above: the first non-blank line of md,
+ * without heading/bullet prefixes or inline markers. */
+int canvas_text_title(const char *md, char *buf, int cap);
+
+/* A weak link: a file node pointing at a box on some canvas
+ * (file "x.canvas", subpath "#<node id>"). It references the box rather
+ * than nesting a canvas. */
+bool canvas_node_is_weak_link(const CanvasNode *n);
+
+/* Canvases this node nests: [[x.canvas]] targets in a text node (alias
+ * after '|' and heading after '#' dropped), or a file node's .canvas path
+ * (not weak links). Targets are as written, unresolved. Returns the count;
+ * *out is a malloc'd array of malloc'd strings (NULL when 0). */
+size_t canvas_node_canvas_links(const CanvasNode *n, char ***out);
+
 /* Index of the node with this id, or -1. */
 int canvas_doc_find_node(const CanvasDoc *doc, const char *id);
 

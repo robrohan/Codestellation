@@ -411,9 +411,8 @@ int main(int argc, char **argv) {
             fprintf(stderr, "error: could not open project %s\n", project_arg);
         }
     }
-    PanelRect crumbs_bounds = { 0, 0, 0, 0 };
-    PanelRect editor_bounds = { 0, 0, 0, 0 };
-    bool esc_was_down = false, delete_was_down = false;
+    CanvasPanels canvas_panels = { { 0, 0, 0, 0 }, { 0, 0, 0, 0 }, { 0, 0, 0, 0 } };
+    bool esc_was_down = false, delete_was_down = false, find_was_down = false;
 
     glEnable(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_DEPTH_TEST);
@@ -437,6 +436,14 @@ int main(int argc, char **argv) {
             if (canvas_view_is_open()) canvas_view_escape();
             else glfwSetWindowShouldClose(win, GLFW_TRUE);
         }
+        /* Cmd+F (macOS) / Ctrl+F: project-wide canvas search. */
+        bool find_down = glfwGetKey(win, GLFW_KEY_F) == GLFW_PRESS &&
+                         (glfwGetKey(win, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+                          glfwGetKey(win, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS ||
+                          glfwGetKey(win, GLFW_KEY_LEFT_SUPER) == GLFW_PRESS ||
+                          glfwGetKey(win, GLFW_KEY_RIGHT_SUPER) == GLFW_PRESS);
+        if (find_down && !find_was_down && canvas_mode) canvas_view_open_search();
+        find_was_down = find_down;
 
         /* Swap in a finished Open build at the top of the frame, before
          * anything below reads node ids or positions, so no frame ever
@@ -495,8 +502,9 @@ int main(int argc, char **argv) {
         bool over_panel = panel_rect_contains(inspector_bounds, (float)mx, (float)my) ||
                            panel_rect_contains(note_bounds, (float)mx, (float)my) ||
                            panel_rect_contains(properties_bounds, (float)mx, (float)my) ||
-                           panel_rect_contains(crumbs_bounds, (float)mx, (float)my) ||
-                           panel_rect_contains(editor_bounds, (float)mx, (float)my);
+                           panel_rect_contains(canvas_panels.crumbs, (float)mx, (float)my) ||
+                           panel_rect_contains(canvas_panels.editor, (float)mx, (float)my) ||
+                           panel_rect_contains(canvas_panels.search, (float)mx, (float)my);
         /* The canvas takes all non-panel mouse input; the 3D view treats
          * it exactly like the cursor being over a panel. */
         bool block_3d = over_panel || canvas_mode;
@@ -718,7 +726,7 @@ int main(int argc, char **argv) {
             props = properties_panel_draw(ctx, &show_origin, lg.notes_path != NULL, &export_notes_clicked,
                                           &properties_bounds);
             /* In code view this draws just the breadcrumb bar, over the 3D. */
-            canvas_view_draw(ctx, width, height, &crumbs_bounds, &editor_bounds);
+            canvas_view_draw(ctx, width, height, &canvas_panels);
             if (!canvas_mode) {
                 labels_draw(ctx, width, height, inspector_bounds, note_bounds, properties_bounds,
                             view_proj, lg.positions, &lg.graph, &lg.notes, selected);

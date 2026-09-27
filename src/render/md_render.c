@@ -10,6 +10,7 @@
 #include "md_render.h"
 #include "fonts.h"
 #include "theme.h"
+#include "../canvas/canvas_doc.h"
 #include <stdbool.h>
 #include <string.h>
 
@@ -207,29 +208,7 @@ void md_render_draw(struct nk_command_buffer *canvas, struct nk_rect r, const ch
 }
 
 int md_title_text(const char *md, char *buf, int cap) {
-    /* First non-blank line. */
-    const char *p = md;
-    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
-    const char *eol = strchr(p, '\n');
-    int n = eol ? (int)(eol - p) : (int)strlen(p);
-
-    /* Strip heading/bullet prefix and inline markers. */
-    int o = 0, i = 0;
-    while (i < n && p[i] == '#') i++;
-    if (i < n && (p[i] == '-' || p[i] == '*') && i + 1 < n && p[i + 1] == ' ') i += 2;
-    while (i < n && p[i] == ' ') i++;
-    for (; i < n && o < cap - 1; i++) {
-        char c = p[i];
-        if (c == '*' || c == '`' || c == '[' || c == ']' || c == '\r') continue;
-        buf[o++] = c;
-    }
-    /* Don't leave half a UTF-8 sequence at a truncation point. */
-    if (i < n) {
-        while (o > 0 && ((unsigned char)buf[o - 1] & 0xC0) == 0x80) o--;
-        if (o > 0 && ((unsigned char)buf[o - 1] & 0xC0) == 0xC0) o--;
-    }
-    buf[o] = '\0';
-    return o;
+    return canvas_text_title(md, buf, cap);
 }
 
 void md_render_title(struct nk_command_buffer *canvas, struct nk_rect r, const char *md, float px) {
