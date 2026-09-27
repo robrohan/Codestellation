@@ -30,6 +30,20 @@ const Theme g_theme = {
     .label_text   = 0xECEEF2,
     .label_shadow = 0x000000,
     .note_dot     = 0xFFB347,
+
+    .canvas_background   = 0x181B20,
+    .grid_minor          = 0x20242B,
+    .grid_major          = 0x2A2F38,
+    .box_fill            = 0x22262D,
+    .box_border          = 0x4A5260,
+    .box_border_selected = 0xFFFFFF,
+    .box_text            = 0xD5D8DE,
+    .box_heading         = 0xF2F4F7,
+    .box_link            = 0x6CB8FF,
+    .box_code_fill       = 0x14161B,
+    .canvas_edge         = 0x7A8496,
+    .canvas_edge_label   = 0xC5CAD3,
+    .box_preset = { 0xE5534B, 0xE8914A, 0xE3C454, 0x57C26A, 0x4FC1C9, 0xA77BE0 },
 };
 
 /* Nuklear's style table, indexed by enum nk_style_colors. Every entry is

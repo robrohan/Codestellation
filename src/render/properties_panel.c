@@ -12,12 +12,12 @@
 #include "../common/pathutil.h"
 #include <stddef.h>
 
-char *properties_panel_draw(struct nk_context *ctx, int *show_origin, bool has_notes,
+char *properties_panel_draw(struct nk_context *ctx, int *show_origin, int *canvas_view, bool has_notes,
                              bool *out_export_clicked, PanelRect *out_bounds) {
     char *picked = NULL;
     *out_export_clicked = false;
 
-    float h = has_notes ? 180.0f : 150.0f;
+    float h = has_notes ? 208.0f : 178.0f;
     if (nk_begin(ctx, PROPERTIES_PANEL_TITLE, nk_rect(20, 20, 260, h),
                  NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
                  NK_WINDOW_MINIMIZABLE)) {
@@ -38,6 +38,7 @@ char *properties_panel_draw(struct nk_context *ctx, int *show_origin, bool has_n
 
         nk_layout_row_dynamic(ctx, 24, 1);
         nk_checkbox_label(ctx, "Show origin", show_origin);
+        nk_checkbox_label(ctx, "Canvas view (spike)", canvas_view);
 
         /* Notes live under Application Support -- easy to lose track of,
          * hence a direct way to get a copy somewhere you'll find it.

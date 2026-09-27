@@ -9,6 +9,7 @@
 
 #include "ui_panel.h"
 #include "note_compose.h"
+#include "fonts.h"
 #include "../common/pathutil.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -238,9 +239,11 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h,
 
     nk_layout_row_dynamic(ctx, content_h, 1);
     size_t len = g_cached_content ? strlen(g_cached_content) : 0;
+    nk_style_push_font(ctx, fonts_mono());
     nk_flags edit_state = nk_edit_string_zero_terminated(
         ctx, NK_EDIT_BOX | NK_EDIT_READ_ONLY, g_cached_content ? g_cached_content : "",
         (int)(len + 1), nk_filter_default);
+    nk_style_pop_font(ctx);
     /* NK_EDIT_ACTIVE means this widget has focus (was clicked into) this
      * very frame -- ctx->current->edit.cursor was just freshly written by
      * the call above in that case, so it's safe to read here. Stashed into

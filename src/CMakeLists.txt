@@ -1,3 +1,26 @@
+# Fonts are compiled into the binary (no runtime resource lookup, same on
+# every platform): each TTF becomes a generated C array, regenerated when
+# the TTF changes. See render/fonts.c.
+set(CODEMAP_FONT_SOURCES)
+foreach(_font
+        "font_inter_regular:Inter-Regular.ttf"
+        "font_inter_bold:Inter-Bold.ttf"
+        "font_inter_italic:Inter-Italic.ttf"
+        "font_jetbrains_mono:JetBrainsMono-Regular.ttf")
+    string(REPLACE ":" ";" _parts "${_font}")
+    list(GET _parts 0 _sym)
+    list(GET _parts 1 _file)
+    set(_in "${CMAKE_SOURCE_DIR}/vendor/fonts/${_file}")
+    set(_out "${CMAKE_CURRENT_BINARY_DIR}/generated/${_sym}.c")
+    add_custom_command(
+        OUTPUT "${_out}"
+        COMMAND ${CMAKE_COMMAND} -DIN=${_in} -DOUT=${_out} -DNAME=${_sym} -P "${CMAKE_SOURCE_DIR}/cmake/embed_file.cmake"
+        DEPENDS "${_in}" "${CMAKE_SOURCE_DIR}/cmake/embed_file.cmake"
+        COMMENT "Embedding ${_file}"
+        VERBATIM)
+    list(APPEND CODEMAP_FONT_SOURCES "${_out}")
+endforeach()
+
 # One binary: the viewer builds project graphs in-process (see
 # render/project_build.c), so the tree-sitter pipeline is linked straight in.
 add_executable(Codestellation
@@ -35,6 +58,10 @@ add_executable(Codestellation
     render/labels.c
     render/panel_rect.c
     render/theme.c
+    render/fonts.c
+    render/md_render.c
+    render/canvas_view.c
+    ${CODEMAP_FONT_SOURCES}
     ${CMAKE_SOURCE_DIR}/vendor/tinyfiledialogs/tinyfiledialogs.c
 )
 target_include_directories(Codestellation PRIVATE

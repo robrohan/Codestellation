@@ -33,6 +33,8 @@
 #include "tinyfiledialogs.h"
 #include "labels.h"
 #include "theme.h"
+#include "fonts.h"
+#include "canvas_view.h"
 #include "panel_rect.h"
 #include "../common/pathutil.h"
 #include "../graph/graph.h"
@@ -288,9 +290,18 @@ int main(int argc, char **argv) {
     struct nk_context *ctx = nk_glfw3_init(&glfw_nk, win, NK_GLFW3_INSTALL_CALLBACKS);
     theme_apply_panels(ctx);
     {
+        /* Bake at the framebuffer's real resolution (see fonts.h). Fixed
+         * at startup: dragging the window to a display with a different
+         * scale keeps the original bake. */
+        int fbw, fbh, ww, wh;
+        glfwGetFramebufferSize(win, &fbw, &fbh);
+        glfwGetWindowSize(win, &ww, &wh);
         struct nk_font_atlas *atlas;
         nk_glfw3_font_stash_begin(&glfw_nk, &atlas);
+        fonts_add(atlas, ww > 0 ? (float)fbw / (float)ww : 1.0f);
         nk_glfw3_font_stash_end(&glfw_nk);
+        fonts_finish();
+        nk_style_set_font(ctx, fonts_ui());
     }
 
     GLScene scene;
@@ -351,6 +362,10 @@ int main(int argc, char **argv) {
      * nk_bool, an int in this build), see properties_panel.h. */
     int show_origin = 1;
 
+    /* Properties' "Canvas view (spike)" checkbox: swaps the 3D graph for
+     * the canvas spike (canvas_view.h). Same int convention. */
+    int canvas_view = 0;
+
     glEnable(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_DEPTH_TEST);
 
@@ -387,6 +402,7 @@ int main(int argc, char **argv) {
             }
         }
 
+        fonts_frame_reset();
         nk_glfw3_new_frame(&glfw_nk);
 
         int width, height;
@@ -413,6 +429,9 @@ int main(int argc, char **argv) {
         bool over_panel = panel_rect_contains(inspector_bounds, (float)mx, (float)my) ||
                            panel_rect_contains(note_bounds, (float)mx, (float)my) ||
                            panel_rect_contains(properties_bounds, (float)mx, (float)my);
+        /* The canvas spike takes all non-panel mouse input; the 3D view
+         * treats it exactly like the cursor being over a panel. */
+        bool block_3d = over_panel || canvas_view;
         int left_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT);
         int middle_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_MIDDLE);
         int right_state = glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT);
@@ -468,7 +487,7 @@ int main(int argc, char **argv) {
         if (interact == INTERACT_NONE) {
             /* Left button: always reposition-drag on a node, or orbit on
              * empty space -- never touches selection. */
-            if (left_pressed_edge && !over_panel) {
+            if (left_pressed_edge && !block_3d) {
                 int hit = pick_nearest_node(view_proj, lg.positions, lg.graph.node_count, width, height,
                                              (float)mx, (float)my, PICK_RADIUS_PX);
                 if (hit >= 0) {
@@ -482,7 +501,7 @@ int main(int argc, char **argv) {
                 }
                 last_mouse_x = mx;
                 last_mouse_y = my;
-            } else if (pan_button_down && !over_panel) {
+            } else if (pan_button_down && !block_3d) {
                 interact = INTERACT_PAN;
                 pan_via_right = (right_state == GLFW_PRESS);
                 cluster_modifier_at_press =
@@ -563,7 +582,18 @@ int main(int argc, char **argv) {
         left_was_down = (left_state == GLFW_PRESS);
 
         float scroll_y = ctx->input.mouse.scroll_delta.y;
-        if (scroll_y != 0.0f && !over_panel) {
+        if (canvas_view) {
+            CanvasInput cin = {
+                .mx = (float)mx, .my = (float)my,
+                .left = left_state == GLFW_PRESS,
+                .right = right_state == GLFW_PRESS,
+                .middle = middle_state == GLFW_PRESS,
+                .scroll = scroll_y,
+                .over_panel = over_panel,
+            };
+            canvas_view_update(&cin, width, height);
+        }
+        if (scroll_y != 0.0f && !block_3d) {
             /* Proportional-to-distance step feels natural zoomed out, but
              * decays asymptotically and stalls well short of the actual
              * floor once close in -- a minimum absolute step keeps every
@@ -585,13 +615,25 @@ int main(int argc, char **argv) {
             }
             for (size_t i = 0; i < cluster_count; i++) cluster_paths[i] = lg.graph.nodes[cluster_ids[i]].path;
 
-            ui_panel_draw(ctx, width, height, sel_path, sel_lang, cluster_paths, cluster_count,
-                          &lg.notes, lg.notes_path, &inspector_bounds);
-            note_compose_draw(ctx, &lg.notes, lg.notes_path, &note_bounds);
-            picked_dir = properties_panel_draw(ctx, &show_origin, lg.notes_path != NULL,
+            if (canvas_view) {
+                /* Inspector/Note describe 3D selections -- hidden here,
+                 * with their bounds cleared so they don't block canvas
+                 * input from where they used to be. */
+                inspector_bounds = (PanelRect){ 0, 0, 0, 0 };
+                note_bounds = (PanelRect){ 0, 0, 0, 0 };
+            } else {
+                ui_panel_draw(ctx, width, height, sel_path, sel_lang, cluster_paths, cluster_count,
+                              &lg.notes, lg.notes_path, &inspector_bounds);
+                note_compose_draw(ctx, &lg.notes, lg.notes_path, &note_bounds);
+            }
+            picked_dir = properties_panel_draw(ctx, &show_origin, &canvas_view, lg.notes_path != NULL,
                                                 &export_notes_clicked, &properties_bounds);
-            labels_draw(ctx, width, height, inspector_bounds, note_bounds, properties_bounds,
-                        view_proj, lg.positions, &lg.graph, &lg.notes, selected);
+            if (canvas_view) {
+                canvas_view_draw(ctx, width, height);
+            } else {
+                labels_draw(ctx, width, height, inspector_bounds, note_bounds, properties_bounds,
+                            view_proj, lg.positions, &lg.graph, &lg.notes, selected);
+            }
 
             if (build) {
                 /* Small status strip, bottom-center. nk_begin only honours
@@ -643,13 +685,15 @@ int main(int argc, char **argv) {
         glViewport(0, 0, fb_width, fb_height);
         {
             float r, g, b;
-            theme_rgb(g_theme.background, &r, &g, &b);
+            theme_rgb(canvas_view ? g_theme.canvas_background : g_theme.background, &r, &g, &b);
             glClearColor(r, g, b, 1.0f);
         }
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        gl_scene_draw(&scene, view_proj, selected);
-        if (show_origin) gl_scene_draw_axis(&scene, view_proj, AXIS_LENGTH);
+        if (!canvas_view) {
+            gl_scene_draw(&scene, view_proj, selected);
+            if (show_origin) gl_scene_draw_axis(&scene, view_proj, AXIS_LENGTH);
+        }
 
         nk_glfw3_render(&glfw_nk, NK_ANTI_ALIASING_ON, MAX_VERTEX_BUFFER, MAX_ELEMENT_BUFFER);
         glfwSwapBuffers(win);

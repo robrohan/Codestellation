@@ -167,6 +167,23 @@ hard-coded markdown boxes and edges. Judge text quality across zoom levels
 with the baked-sizes approach. If text can't be made acceptable, revisit the
 native-vs-web decision before investing further.
 
+**Result (2026-09-27): passed, so we stay native.** The user judged the
+canvas "looks great". What the spike established, reusable in step 4:
+
+- Fonts: Inter (regular/bold/italic) + JetBrains Mono, vendored in
+  `vendor/fonts/` (OFL) and compiled into the binary
+  (`cmake/embed_file.cmake`). `src/render/fonts.c` bakes each at 10/14/20/28/40
+  logical px × framebuffer scale, for crisp text on Retina. Any other size is
+  the next baked size scaled via a per-frame pool (`fonts_sized`). The atlas
+  is 1024×4096 at 2×. Panels now use Inter 14, the file preview uses Mono 13
+  (the user finds the preview a bit small; bump `MONO_UI_SIZE` sometime).
+- `src/render/md_render.c`: markdown subset with word wrap, drawn straight
+  into a Nuklear command buffer.
+- `src/render/canvas_view.c`: grid, zoom around the cursor, pan, drag,
+  bezier edges with arrowheads and labels, title-only below 7px body text.
+  Hard-coded sample boxes. Toggled by Properties > "Canvas view (spike)".
+  Step 4 replaces the sample data and the toggle.
+
 ### 4. Canvas v1
 
 - Load/save JSON Canvas `.canvas` files.

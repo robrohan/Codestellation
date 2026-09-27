@@ -27,6 +27,22 @@ typedef struct {
     ThemeColor label_text;
     ThemeColor label_shadow;    /* drawn 1px down-right, under the text */
     ThemeColor note_dot;
+
+    /* 2D canvas (canvas_view.c, md_render.c) */
+    ThemeColor canvas_background;
+    ThemeColor grid_minor, grid_major;
+    ThemeColor box_fill;
+    ThemeColor box_border;          /* uncoloured box */
+    ThemeColor box_border_selected;
+    ThemeColor box_text;
+    ThemeColor box_heading;
+    ThemeColor box_link;
+    ThemeColor box_code_fill;
+    ThemeColor canvas_edge;
+    ThemeColor canvas_edge_label;
+    /* JSON Canvas preset colours "1".."6": red, orange, yellow, green,
+     * cyan, purple. Index 0 is preset "1". */
+    ThemeColor box_preset[6];
 } Theme;
 
 extern const Theme g_theme;

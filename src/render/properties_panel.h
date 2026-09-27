@@ -34,7 +34,10 @@ struct nk_context;
  * selection -- NULL every other frame, including when the picker was
  * canceled. *out_bounds receives this frame's live window rect, same
  * convention as ui_panel_draw/note_compose_draw. */
-char *properties_panel_draw(struct nk_context *ctx, int *show_origin, bool has_notes,
+/* *canvas_view: the "Canvas view (spike)" checkbox, same int convention
+ * as show_origin -- switches main.c between the 3D graph and the canvas
+ * spike (canvas_view.h). */
+char *properties_panel_draw(struct nk_context *ctx, int *show_origin, int *canvas_view, bool has_notes,
                              bool *out_export_clicked, PanelRect *out_bounds);
 
 #endif
