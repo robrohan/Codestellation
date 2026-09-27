@@ -196,7 +196,7 @@ canvas "looks great". What the spike established, reusable in step 4:
 - Breadcrumb bar across canvas and 3D levels.
 - Grid background.
 
-**Status (2026-09-27): canvas parts done, directory links (4c) remaining.**
+**Status (2026-09-27): done, including directory links (4c).**
 Decisions made along the way:
 
 - There is a `project.json` after all (`src/canvas/project.c`): title,
@@ -218,10 +218,18 @@ Decisions made along the way:
   shortcut key on macOS (copy/paste in the editor).
 - Known gaps: no undo; the editor doesn't word-wrap (a Nuklear limitation).
 
-**4c, next:** directory `[[links]]` open the 3D explorer, with several
-folders merged into one graph (`walk_project` over each root into one
-FileList, cached under a hash of the sorted folder set), and a `[code]`
-breadcrumb to get back to the canvas.
+**4c (directory links):** shift+click a box whose `[[links]]` resolve to
+folders (and that has no canvas link, which takes priority; the editor has an
+"Open code" button for boxes with both). `main.c` builds them on the worker
+thread into one graph (`build_graph_json` takes several roots and
+de-duplicates nested ones), cached in Application Support under a hash of the
+sorted, normalized folder set. A single folder hashes exactly as before, so
+Open Folder caches and notes still line up. On success the canvas hides and a
+final `</> title` crumb appears; Esc or any canvas crumb returns. Boxes with
+folder links show a `</>` marker; the per-box folder count is cached, keyed
+on a hash of the box text, since resolving and stat-ing links every frame
+was wasteful. The code graph is rebuilt on every visit (correct but slow for
+huge trees); reusing the cache is a possible later improvement.
 
 ### 5. Search + weak links
 
@@ -230,7 +238,15 @@ click a weak link to jump to its original box.
 
 ### 6. Later
 
-- Colour/readability polish (dark mode is hard to see now).
+- ~~Colour/readability polish~~ (done in step 2).
+- **Inspector scroll jump:** clicking a line in the source preview and then
+  "+ Add note" opens the Note pane on the right line, but scrolls the
+  preview back to the top of the file. It should stay on that line, since
+  the surrounding code is context for the note.
+- Source preview font is a bit small (`MONO_UI_SIZE` in `fonts.c`).
+- Reuse the cached code graph instead of rebuilding on every shift+click,
+  with an explicit Rebuild. Deferred until rebuild time is an actual problem
+  (the user's call).
 - Manual export: depth-first walk producing a document (canvas = section,
   box = subsection with its note, edges as "A → B (label)", code leaves with
   file notes + generated summary: languages, file count, most-depended-on
@@ -240,11 +256,12 @@ click a weak link to jump to its original box.
 
 ## Open questions
 
-- Root of a project: a `project.json` pointing at the root `.canvas`, or the
-  root `.canvas` itself? (Decide in step 4.)
-- Where the per-box code graph caches live when a box maps to several
-  folders (Application Support keyed by the sorted folder set is the likely
-  answer).
+- ~~Root of a project~~: `project.json` (decided in step 4).
+- ~~Per-box code graph caches~~: Application Support, keyed by the sorted
+  folder set (done in 4c).
+- Boxes are expected to hold *either* canvas links *or* folder links, not
+  both (the user doesn't plan to mix them); the canvas-wins rule and the
+  "Open code" button just keep a mixed box usable.
 - Whether to also allow existing JSON Canvas `file` nodes (not just `[[links]]`
   in text) to point at directories or canvases. It's cheap to support and
   improves Obsidian compatibility.

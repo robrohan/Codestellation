@@ -2,6 +2,7 @@
 #define CODEMAP_PROJECT_BUILD_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 /* The "Open a project" flow, run in-process without blocking the window:
  * resolve a picked directory to its Application Support project folder,
@@ -13,17 +14,20 @@
  * (the pipeline isn't reentrant). */
 typedef struct ProjectBuild ProjectBuild;
 
-/* picked_dir: an absolute, existing directory (e.g. straight from
- * tinyfd_selectFolderDialog). Returns NULL -- having already shown a
- * native error dialog -- if the project folder can't be created or the
- * worker can't be started. */
-ProjectBuild *project_build_start(const char *picked_dir);
+/* dirs: one or more existing directories (e.g. straight from
+ * tinyfd_selectFolderDialog, or a canvas box's folder links), built into
+ * one graph. The Application Support folder is keyed on the normalized,
+ * sorted set, so the same folders always share a cache (and notes).
+ * Returns NULL -- having already shown a native error dialog -- if the
+ * project folder can't be created or the worker can't be started. */
+ProjectBuild *project_build_start(const char *const *dirs, size_t count);
 
 /* Non-blocking: true once the worker has finished (successfully or not). */
 bool project_build_is_done(ProjectBuild *b);
 
-/* The directory being built, trailing slashes stripped -- for status text. */
-const char *project_build_root(const ProjectBuild *b);
+/* What's being built, for status text: the directory, or the first one
+ * plus how many more. */
+const char *project_build_label(const ProjectBuild *b);
 
 /* Waits for the worker if it hasn't finished, then frees b. On success
  * returns the newly malloc'd path to the built graph.json (caller frees);

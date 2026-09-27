@@ -90,6 +90,11 @@ files, so Obsidian can open them too. On the canvas:
   dots to draw an edge to another box
 - shift+click a box containing `[[something.canvas]]` to go into that canvas
   (created on first visit); the breadcrumb bar at the top walks back out
+- shift+click a box whose `[[links]]` point at folders (relative to the
+  canvas, or absolute) to open that code in the 3D explorer -- several
+  folders are merged into one graph; Esc or a breadcrumb returns to the
+  canvas. A box with both kinds goes into the canvas; its editor has an
+  "Open code" button
 - Delete/Backspace removes the selection; Esc closes the editor, clears the
   selection, then goes up a level
 - scroll to zoom, drag empty space (or right/middle-drag) to pan

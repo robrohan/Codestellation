@@ -347,6 +347,9 @@ int main(int argc, char **argv) {
     /* In-flight Properties > Open build, if any -- polled once per frame
      * below; the old graph stays fully usable until the new one is ready. */
     ProjectBuild *build = NULL;
+    /* Set when `build` was started from a canvas box's folder links: on
+     * success the canvas switches to code view under this crumb title. */
+    char *build_code_title = NULL;
 
     int selected = -1;
     int drag_node = -1;
@@ -420,7 +423,9 @@ int main(int argc, char **argv) {
         /* Esc walks back up the canvas trail when a project is open (see
          * canvas_view_escape) and only quits in the plain 3D explorer.
          * Delete/Backspace remove the canvas selection. Both edge-triggered. */
-        bool canvas_mode = canvas_view_is_open();
+        /* The canvas replaces the 3D view while a project is open, except
+         * while a box's code is showing (canvas_view_in_code). */
+        bool canvas_mode = canvas_view_is_open() && !canvas_view_in_code();
         bool esc_down = glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS;
         bool delete_down = glfwGetKey(win, GLFW_KEY_DELETE) == GLFW_PRESS ||
                            glfwGetKey(win, GLFW_KEY_BACKSPACE) == GLFW_PRESS;
@@ -429,7 +434,7 @@ int main(int argc, char **argv) {
         esc_was_down = esc_down;
         delete_was_down = delete_down;
         if (esc_pressed) {
-            if (canvas_mode) canvas_view_escape();
+            if (canvas_view_is_open()) canvas_view_escape();
             else glfwSetWindowShouldClose(win, GLFW_TRUE);
         }
 
@@ -452,12 +457,15 @@ int main(int argc, char **argv) {
                     interact = INTERACT_NONE;
                     cluster_count = 0;
                     note_compose_close();
+                    if (build_code_title) canvas_view_enter_code(build_code_title);
                 } else {
                     tinyfd_messageBox("Codestellation", "The project built, but its graph.json could not be read.",
                                       "ok", "error", 1);
                 }
                 free(new_graph_path);
             }
+            free(build_code_title);
+            build_code_title = NULL;
         }
 
         fonts_frame_reset();
@@ -642,7 +650,7 @@ int main(int argc, char **argv) {
         left_was_down = (left_state == GLFW_PRESS);
 
         float scroll_y = ctx->input.mouse.scroll_delta.y;
-        if (canvas_mode) {
+        if (canvas_view_is_open()) {
             CanvasInput cin = {
                 .mx = (float)mx, .my = (float)my,
                 .left = left_state == GLFW_PRESS,
@@ -656,6 +664,23 @@ int main(int argc, char **argv) {
                 .key_delete = delete_pressed,
             };
             canvas_view_update(&cin, width, height);
+
+            char **code_dirs;
+            size_t code_count;
+            char *code_title;
+            if (canvas_view_take_code_request(&code_dirs, &code_count, &code_title)) {
+                /* One build at a time; a request while one runs is dropped. */
+                if (!build) {
+                    build = project_build_start((const char *const *)code_dirs, code_count);
+                    if (build) {
+                        build_code_title = code_title;
+                        code_title = NULL;
+                    }
+                }
+                for (size_t i = 0; i < code_count; i++) free(code_dirs[i]);
+                free(code_dirs);
+                free(code_title);
+            }
         }
         if (scroll_y != 0.0f && !block_3d) {
             /* Proportional-to-distance step feels natural zoomed out, but
@@ -692,11 +717,9 @@ int main(int argc, char **argv) {
             }
             props = properties_panel_draw(ctx, &show_origin, lg.notes_path != NULL, &export_notes_clicked,
                                           &properties_bounds);
-            if (canvas_mode) {
-                canvas_view_draw(ctx, width, height, &crumbs_bounds, &editor_bounds);
-            } else {
-                crumbs_bounds = (PanelRect){ 0, 0, 0, 0 };
-                editor_bounds = (PanelRect){ 0, 0, 0, 0 };
+            /* In code view this draws just the breadcrumb bar, over the 3D. */
+            canvas_view_draw(ctx, width, height, &crumbs_bounds, &editor_bounds);
+            if (!canvas_mode) {
                 labels_draw(ctx, width, height, inspector_bounds, note_bounds, properties_bounds,
                             view_proj, lg.positions, &lg.graph, &lg.notes, selected);
             }
@@ -709,7 +732,7 @@ int main(int argc, char **argv) {
                 if (nk_begin(ctx, "##building", nk_rect(((float)width - bw) * 0.5f, (float)height - bh - 16.0f, bw, bh),
                              NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_NO_INPUT)) {
                     nk_layout_row_dynamic(ctx, 24, 1);
-                    nk_labelf(ctx, NK_TEXT_CENTERED, "Building %s ...", project_build_root(build));
+                    nk_labelf(ctx, NK_TEXT_CENTERED, "Building %s ...", project_build_label(build));
                 }
                 nk_end(ctx);
             }
@@ -719,8 +742,10 @@ int main(int argc, char **argv) {
             /* Plain folder exploring leaves project mode. One build at a
              * time -- the pipeline isn't reentrant; a second Open while one
              * is running is dropped (the status strip shows what's running). */
-            project_deactivate(win, &project, &have_project);
-            if (!build) build = project_build_start(props.path);
+            if (!build) {
+                build = project_build_start((const char *const *)&props.path, 1);
+                if (build) project_deactivate(win, &project, &have_project);
+            }
         } else if (props.action == PROPS_OPEN_PROJECT || props.action == PROPS_NEW_PROJECT) {
             Project p;
             bool ok;
@@ -769,12 +794,13 @@ int main(int argc, char **argv) {
         glViewport(0, 0, fb_width, fb_height);
         {
             float r, g, b;
-            theme_rgb(canvas_view_is_open() ? g_theme.canvas_background : g_theme.background, &r, &g, &b);
+            bool show_canvas = canvas_view_is_open() && !canvas_view_in_code();
+            theme_rgb(show_canvas ? g_theme.canvas_background : g_theme.background, &r, &g, &b);
             glClearColor(r, g, b, 1.0f);
         }
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        if (!canvas_view_is_open()) {
+        if (!canvas_view_is_open() || canvas_view_in_code()) {
             gl_scene_draw(&scene, view_proj, selected);
             if (show_origin) gl_scene_draw_axis(&scene, view_proj, AXIS_LENGTH);
         }

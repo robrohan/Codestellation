@@ -72,6 +72,11 @@ bool path_exists(const char *path) {
     return stat(path, &st) == 0;
 }
 
+bool path_is_dir(const char *path) {
+    struct stat st;
+    return stat(path, &st) == 0 && (st.st_mode & S_IFMT) == S_IFDIR;
+}
+
 const char *path_extension(const char *path) {
     const char *slash = strrchr(path, '/');
     const char *bslash = strrchr(path, '\\');

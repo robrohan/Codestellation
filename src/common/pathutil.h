@@ -14,6 +14,7 @@ char *path_dirname(const char *path);
  * doesn't exist. */
 char *path_normalize(const char *path);
 bool  path_exists(const char *path);
+bool  path_is_dir(const char *path);
 
 /* Returns a pointer *into* path (not malloc'd) at the last "." in the
  * final path component, or "" if there is none. */

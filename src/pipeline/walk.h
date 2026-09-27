@@ -16,4 +16,8 @@ void filelist_free(FileList *list);
  * first. */
 void walk_project(const char *root, FileList *out);
 
+/* Same, but appends to an already-initialized list -- for building one
+ * graph from several roots. */
+void walk_project_append(const char *root, FileList *list);
+
 #endif

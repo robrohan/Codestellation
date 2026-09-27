@@ -16,6 +16,7 @@
 #include "../common/pathutil.h"
 #include "tinyfiledialogs.h"
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -93,7 +94,19 @@ static char g_edit_buf[EDIT_BUF_SIZE];
  * the start of the next update so the doc never changes mid-draw. */
 static int g_pending_crumb = -1;
 static int g_pending_go_into = -1;
+static int g_pending_open_code = -1;
 static bool g_pending_delete = false;
+
+/* Code mode: a box's folders are showing in the 3D explorer (main.c owns
+ * that); the canvas is hidden but its trail stays, with one extra crumb. */
+static bool g_in_code = false;
+static char *g_code_title = NULL;
+
+/* Folders queued by shift+click / "Open code", waiting for main.c to take
+ * them (canvas_view_take_code_request). */
+static char **g_code_req_dirs = NULL;
+static size_t g_code_req_count = 0;
+static char *g_code_req_title = NULL;
 
 /* ---- small helpers ------------------------------------------------------ */
 
@@ -166,6 +179,110 @@ static char *canvas_link_of(const CanvasNode *n) {
     return NULL;
 }
 
+/* The existing folders this node links to -- [[targets]] in a text node
+ * (or a file node's path) that resolve, relative to the current canvas, to
+ * a directory. Returns the count; *out is a malloc'd array of malloc'd
+ * absolute paths (NULL when 0). */
+static size_t dir_links_of(const CanvasNode *n, char ***out) {
+    *out = NULL;
+    size_t count = 0, cap = 0;
+    const char *single = NULL;
+    if (n->type == CNODE_FILE) single = n->file;
+    else if (n->type != CNODE_TEXT || !n->text) return 0;
+
+    const char *p = single ? NULL : n->text;
+    for (;;) {
+        const char *target;
+        size_t len;
+        if (single) {
+            target = single;
+            len = strlen(single);
+        } else {
+            p = strstr(p, "[[");
+            if (!p) break;
+            p += 2;
+            const char *end = strstr(p, "]]");
+            if (!end) break;
+            len = 0;
+            while (p + len < end && p[len] != '|' && p[len] != '#') len++;
+            target = p;
+            p = end + 2;
+        }
+        if (len > 0 && !ends_with_ci(target, len, ".canvas")) {
+            char *raw = (char *)malloc(len + 1);
+            memcpy(raw, target, len);
+            raw[len] = '\0';
+            char *path = project_resolve_link(cur_path(), raw);
+            free(raw);
+            bool dup = false;
+            for (size_t i = 0; i < count; i++) dup = dup || strcmp((*out)[i], path) == 0;
+            if (!dup && path_is_dir(path)) {
+                if (count == cap) {
+                    cap = cap ? cap * 2 : 4;
+                    *out = (char **)realloc(*out, cap * sizeof(char *));
+                }
+                (*out)[count++] = path;
+            } else {
+                free(path);
+            }
+        }
+        if (single) break;
+    }
+    return count;
+}
+
+static void free_dirs(char **dirs, size_t count) {
+    for (size_t i = 0; i < count; i++) free(dirs[i]);
+    free(dirs);
+}
+
+/* dir_links_of resolves and stats every link -- too much to redo for each
+ * box every frame just to draw a marker -- so the count is cached per node
+ * index, keyed on a hash of what it was computed from. Cleared whenever a
+ * canvas loads (links are relative to it). */
+typedef struct {
+    uint64_t key;
+    int count;
+    bool valid;
+} DirCountCache;
+static DirCountCache *g_dir_cache = NULL;
+static size_t g_dir_cache_cap = 0;
+
+static uint64_t node_link_key(const CanvasNode *n) {
+    const char *s = n->type == CNODE_FILE ? n->file : n->text;
+    uint64_t h = 1469598103934665603ULL ^ (uint64_t)n->type;
+    for (const unsigned char *p = (const unsigned char *)(s ? s : ""); *p; p++) {
+        h ^= *p;
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+static int cached_dir_count(int i) {
+    if (g_dir_cache_cap < g_doc.node_count) {
+        size_t cap = g_doc.node_count * 2;
+        g_dir_cache = (DirCountCache *)realloc(g_dir_cache, cap * sizeof(DirCountCache));
+        memset(g_dir_cache + g_dir_cache_cap, 0, (cap - g_dir_cache_cap) * sizeof(DirCountCache));
+        g_dir_cache_cap = cap;
+    }
+    const CanvasNode *n = &g_doc.nodes[i];
+    uint64_t key = node_link_key(n);
+    DirCountCache *c = &g_dir_cache[i];
+    if (!c->valid || c->key != key) {
+        char **dirs;
+        size_t count = dir_links_of(n, &dirs);
+        free_dirs(dirs, count);
+        c->key = key;
+        c->count = (int)count;
+        c->valid = true;
+    }
+    return c->count;
+}
+
+static void clear_dir_cache(void) {
+    if (g_dir_cache) memset(g_dir_cache, 0, g_dir_cache_cap * sizeof(DirCountCache));
+}
+
 /* Crumb label for going into node n: its title, else the link's file name. */
 static char *crumb_title_for(const CanvasNode *n, const char *link) {
     char buf[64];
@@ -204,6 +321,7 @@ static void clear_selection(void) {
 static void load_current(void) {
     canvas_doc_free(&g_doc);
     g_load_failed = !canvas_doc_read(cur_path(), &g_doc);
+    clear_dir_cache();
     if (g_load_failed) fprintf(stderr, "warning: could not read %s -- showing it empty, not saving\n", cur_path());
     clear_selection();
     g_mode = MODE_NONE;
@@ -255,11 +373,35 @@ static void pop_to(int index) {
     g_oy = g_nav[index].oy;
 }
 
+/* Queues node n's folders for main.c to build and show in 3D. */
+static void request_code(int node_index) {
+    if (node_index < 0 || node_index >= (int)g_doc.node_count) return;
+    const CanvasNode *n = &g_doc.nodes[node_index];
+    char **dirs;
+    size_t count = dir_links_of(n, &dirs);
+    if (count == 0) return;
+    free_dirs(g_code_req_dirs, g_code_req_count);
+    free(g_code_req_title);
+    g_code_req_dirs = dirs;
+    g_code_req_count = count;
+    char buf[64];
+    if (n->type == CNODE_TEXT && n->text && md_title_text(n->text, buf, (int)sizeof(buf)) > 0) {
+        g_code_req_title = xstrdup(buf);
+    } else {
+        const char *base = strrchr(dirs[0], '/');
+        g_code_req_title = xstrdup(base ? base + 1 : dirs[0]);
+    }
+}
+
+/* Shift+click: a canvas link wins; otherwise the box's folders open in 3D. */
 static void go_into(int node_index) {
     if (node_index < 0 || node_index >= (int)g_doc.node_count) return;
     const CanvasNode *n = &g_doc.nodes[node_index];
     char *link = canvas_link_of(n);
-    if (!link) return; /* directory links arrive in step 4c */
+    if (!link) {
+        request_code(node_index);
+        return;
+    }
 
     char *path = project_resolve_link(cur_path(), link);
     if (!path_exists(path) && !canvas_doc_write_empty(path)) {
@@ -328,12 +470,51 @@ void canvas_view_close(void) {
     g_depth = 0;
     g_open = false;
     clear_selection();
+    g_in_code = false;
+    free(g_code_title);
+    g_code_title = NULL;
+    free_dirs(g_code_req_dirs, g_code_req_count);
+    g_code_req_dirs = NULL;
+    g_code_req_count = 0;
+    free(g_code_req_title);
+    g_code_req_title = NULL;
 }
 
 bool canvas_view_is_open(void) { return g_open; }
 
+bool canvas_view_in_code(void) { return g_open && g_in_code; }
+
+void canvas_view_enter_code(const char *title) {
+    if (!g_open) return;
+    free(g_code_title);
+    g_code_title = xstrdup(title && *title ? title : "code");
+    g_in_code = true;
+    clear_selection();
+}
+
+bool canvas_view_take_code_request(char ***dirs, size_t *count, char **title) {
+    if (!g_code_req_dirs) return false;
+    *dirs = g_code_req_dirs;
+    *count = g_code_req_count;
+    *title = g_code_req_title;
+    g_code_req_dirs = NULL;
+    g_code_req_count = 0;
+    g_code_req_title = NULL;
+    return true;
+}
+
+static void leave_code(void) {
+    g_in_code = false;
+    free(g_code_title);
+    g_code_title = NULL;
+}
+
 void canvas_view_escape(void) {
     if (!g_open) return;
+    if (g_in_code) {
+        leave_code();
+        return;
+    }
     if (g_editor_open || g_sel != SEL_NONE) {
         clear_selection();
         return;
@@ -576,12 +757,24 @@ void canvas_view_update(const CanvasInput *in, int width, int height) {
     g_cursor_y = in->my;
 
     if (g_pending_crumb >= 0) {
+        if (g_in_code) leave_code();
         pop_to(g_pending_crumb);
         g_pending_crumb = -1;
+    }
+    if (g_in_code) {
+        /* The 3D explorer owns all input while code is showing. */
+        g_prev_left = in->left;
+        g_prev_right = in->right;
+        g_prev_middle = in->middle;
+        return;
     }
     if (g_pending_go_into >= 0) {
         go_into(g_pending_go_into);
         g_pending_go_into = -1;
+    }
+    if (g_pending_open_code >= 0) {
+        request_code(g_pending_open_code);
+        g_pending_open_code = -1;
     }
     if (g_pending_delete) {
         delete_selection();
@@ -854,13 +1047,24 @@ static void draw_box(struct nk_command_buffer *c, int i, struct nk_rect window_c
         nk_push_scissor(c, window_clip);
     }
 
-    /* A canvas link: small corner marker so it's obvious shift+click goes somewhere. */
+    /* Corner markers so it's obvious shift+click goes somewhere: a
+     * triangle for a canvas link, "</>" for folders of code. */
     char *link = canvas_link_of(n);
+    float marker_x = r.x + r.w - 4.0f;
     if (link) {
         free(link);
         float s = fminf(fmaxf(9.0f * g_zoom, 5.0f), 12.0f);
         nk_fill_triangle(c, r.x + r.w - s - 4.0f, r.y + 4.0f, r.x + r.w - 4.0f, r.y + 4.0f, r.x + r.w - 4.0f,
                          r.y + 4.0f + s, theme_nk(border));
+        marker_x -= s + 4.0f;
+    }
+    if (cached_dir_count(i) > 0 && g_zoom >= 0.3f) {
+        const struct nk_user_font *f = fonts_sized(FONT_MONO, fminf(fmaxf(11.0f * g_zoom, 8.0f), 14.0f));
+        float w = f->width(f->userdata, f->height, "</>", 3);
+        push_clip(c, r, window_clip);
+        nk_draw_text(c, nk_rect(marker_x - w, r.y + 3.0f, w + 2.0f, f->height), "</>", 3, f, nk_rgba(0, 0, 0, 0),
+                     theme_nk(border));
+        nk_push_scissor(c, window_clip);
     }
 }
 
@@ -934,8 +1138,8 @@ static void draw_canvas_layer(struct nk_context *ctx, int width, int height) {
 
         char hud[160];
         snprintf(hud, sizeof(hud),
-                 "%.0f%%   \xC2\xB7   double-click: add / edit   \xC2\xB7   shift+click: go in   \xC2\xB7   "
-                 "Esc: up",
+                 "%.0f%%   \xC2\xB7   double-click: add / edit   \xC2\xB7   shift+click: go in / open code   "
+                 "\xC2\xB7   Esc: up",
                  g_zoom * 100.0f);
         float fh = fonts_ui()->height;
         draw_text_at(c, 12.0f, (float)height - fh - 12.0f, hud, g_theme.canvas_edge_label);
@@ -957,11 +1161,14 @@ static void draw_breadcrumbs(struct nk_context *ctx, int width, PanelRect *out) 
     struct nk_vec2 pad = ctx->style.window.padding;
     float spacing = ctx->style.window.spacing.x;
 
-    char labels[MAX_DEPTH][48];
-    float widths[MAX_DEPTH];
+    /* The canvas trail, plus a final "code" crumb while 3D is showing. */
+    int crumbs = g_depth + (g_in_code ? 1 : 0);
+    char labels[MAX_DEPTH + 1][64];
+    float widths[MAX_DEPTH + 1];
     float total = 0.0f;
-    for (int i = 0; i < g_depth; i++) {
-        snprintf(labels[i], sizeof(labels[i]), "%s", g_nav[i].title);
+    for (int i = 0; i < crumbs; i++) {
+        if (i < g_depth) snprintf(labels[i], sizeof(labels[i]), "%s", g_nav[i].title);
+        else snprintf(labels[i], sizeof(labels[i]), "</> %s", g_code_title ? g_code_title : "code");
         widths[i] = f->width(f->userdata, f->height, labels[i], (int)strlen(labels[i])) + 18.0f;
         total += widths[i];
         if (i) total += sep_w + spacing * 2.0f;
@@ -974,14 +1181,14 @@ static void draw_breadcrumbs(struct nk_context *ctx, int width, PanelRect *out) 
     if (nk_begin(ctx, CRUMBS_TITLE, bounds, NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR)) {
         struct nk_rect b = nk_window_get_bounds(ctx);
         *out = (PanelRect){ b.x, b.y, b.w, b.h };
-        nk_layout_row_begin(ctx, NK_STATIC, row_h, g_depth * 2 - 1);
-        for (int i = 0; i < g_depth; i++) {
+        nk_layout_row_begin(ctx, NK_STATIC, row_h, crumbs * 2 - 1);
+        for (int i = 0; i < crumbs; i++) {
             if (i) {
                 nk_layout_row_push(ctx, sep_w);
                 nk_label(ctx, "\xE2\x80\xBA", NK_TEXT_CENTERED);
             }
             nk_layout_row_push(ctx, widths[i]);
-            if (i == g_depth - 1) {
+            if (i == crumbs - 1) {
                 nk_label(ctx, labels[i], NK_TEXT_CENTERED);
             } else if (nk_button_label(ctx, labels[i])) {
                 g_pending_crumb = i;
@@ -1057,8 +1264,10 @@ static void draw_editor(struct nk_context *ctx, int width, int height, PanelRect
         }
 
         char *link = node ? canvas_link_of(node) : NULL;
-        nk_layout_row_dynamic(ctx, 26, link ? 3 : 2);
+        int ndirs = node ? cached_dir_count(g_sel_index) : 0;
+        nk_layout_row_dynamic(ctx, 26, 2 + (link ? 1 : 0) + (ndirs ? 1 : 0));
         if (link && nk_button_label(ctx, "Go into")) g_pending_go_into = g_sel_index;
+        if (ndirs && nk_button_label(ctx, "Open code")) g_pending_open_code = g_sel_index;
         free(link);
         if (nk_button_label(ctx, "Delete")) g_pending_delete = true;
         if (nk_button_label(ctx, "Close")) {
@@ -1073,7 +1282,7 @@ void canvas_view_draw(struct nk_context *ctx, int width, int height, PanelRect *
     *out_crumbs = (PanelRect){ 0, 0, 0, 0 };
     *out_editor = (PanelRect){ 0, 0, 0, 0 };
     if (!g_open) return;
-    draw_canvas_layer(ctx, width, height);
+    if (!g_in_code) draw_canvas_layer(ctx, width, height);
     draw_breadcrumbs(ctx, width, out_crumbs);
-    draw_editor(ctx, width, height, out_editor);
+    if (!g_in_code) draw_editor(ctx, width, height, out_editor);
 }

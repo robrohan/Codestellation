@@ -6,12 +6,35 @@
 #include "../graph/graph.h"
 #include "../graph/graph_json.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-bool build_graph_json(const char *root, const char *out_path) {
+static int cmp_str(const void *a, const void *b) {
+    return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+/* Sorts and drops exact duplicates -- nested roots walk the same files. */
+static void dedupe(FileList *files) {
+    if (files->count < 2) return;
+    qsort(files->paths, files->count, sizeof(char *), cmp_str);
+    size_t out = 1;
+    for (size_t i = 1; i < files->count; i++) {
+        if (strcmp(files->paths[i], files->paths[out - 1]) == 0) {
+            free(files->paths[i]);
+        } else {
+            files->paths[out++] = files->paths[i];
+        }
+    }
+    files->count = out;
+}
+
+bool build_graph_json(const char *const *roots, size_t root_count, const char *out_path) {
     adapter_registry_init();
 
     FileList files;
-    walk_project(root, &files);
+    filelist_init(&files);
+    for (size_t i = 0; i < root_count; i++) walk_project_append(roots[i], &files);
+    if (root_count > 1) dedupe(&files);
     printf("found %zu source files\n", files.count);
 
     ParsedFileList parsed;
