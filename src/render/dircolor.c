@@ -7,6 +7,7 @@
 
 #include "dircolor.h"
 #include "dirgroup.h"
+#include "theme.h"
 #include <stdint.h>
 #include <math.h>
 
@@ -49,6 +50,6 @@ void dircolor_compute(const Graph *g, float *out_colors) {
          * produce muddy or near-black colors; this guarantees every
          * group reads clearly against the dark 3D background. */
         float hue = (float)(h % 360ULL);
-        hsl_to_rgb(hue, 0.55f, 0.55f, &out_colors[i * 3 + 0], &out_colors[i * 3 + 1], &out_colors[i * 3 + 2]);
+        hsl_to_rgb(hue, g_theme.node_saturation, g_theme.node_lightness, &out_colors[i * 3 + 0], &out_colors[i * 3 + 1], &out_colors[i * 3 + 2]);
     }
 }

@@ -34,6 +34,7 @@ add_executable(Codestellation
     render/project_build.c
     render/labels.c
     render/panel_rect.c
+    render/theme.c
     ${CMAKE_SOURCE_DIR}/vendor/tinyfiledialogs/tinyfiledialogs.c
 )
 target_include_directories(Codestellation PRIVATE

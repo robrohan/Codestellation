@@ -32,6 +32,7 @@
 #include "project_build.h"
 #include "tinyfiledialogs.h"
 #include "labels.h"
+#include "theme.h"
 #include "panel_rect.h"
 #include "../common/pathutil.h"
 #include "../graph/graph.h"
@@ -285,6 +286,7 @@ int main(int argc, char **argv) {
 
     struct nk_glfw glfw_nk = { 0 };
     struct nk_context *ctx = nk_glfw3_init(&glfw_nk, win, NK_GLFW3_INSTALL_CALLBACKS);
+    theme_apply_panels(ctx);
     {
         struct nk_font_atlas *atlas;
         nk_glfw3_font_stash_begin(&glfw_nk, &atlas);
@@ -639,7 +641,11 @@ int main(int argc, char **argv) {
         int fb_width, fb_height;
         glfwGetFramebufferSize(win, &fb_width, &fb_height);
         glViewport(0, 0, fb_width, fb_height);
-        glClearColor(0.09f, 0.09f, 0.11f, 1.0f);
+        {
+            float r, g, b;
+            theme_rgb(g_theme.background, &r, &g, &b);
+            glClearColor(r, g, b, 1.0f);
+        }
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         gl_scene_draw(&scene, view_proj, selected);

@@ -3,6 +3,7 @@
  * path, and this keeps codemap-view runnable from any working directory. */
 
 #include "gl_scene.h"
+#include "theme.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -149,6 +150,12 @@ void gl_scene_set_cluster_points(GLScene *scene, const unsigned int *node_ids, s
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(count * sizeof(unsigned int)), node_ids, GL_DYNAMIC_DRAW);
 }
 
+static void set_flat_color(const GLScene *scene, ThemeColor c) {
+    float r, g, b;
+    theme_rgb(c, &r, &g, &b);
+    glUniform4f(scene->u_color, r, g, b, 1.0f);
+}
+
 void gl_scene_draw(const GLScene *scene, const float *mvp, int highlight_index) {
     glUseProgram(scene->prog);
     glUniformMatrix4fv(scene->u_mvp, 1, GL_FALSE, mvp);
@@ -163,16 +170,12 @@ void gl_scene_draw(const GLScene *scene, const float *mvp, int highlight_index) 
      * by dimming the RGB itself rather than via alpha -- simpler than
      * introducing blend-state management for one effect. */
     bool has_highlight = highlight_index >= 0;
-    if (has_highlight) {
-        glUniform4f(scene->u_color, 0.30f * 0.25f, 0.55f * 0.25f, 0.75f * 0.25f, 1.0f);
-    } else {
-        glUniform4f(scene->u_color, 0.30f, 0.55f, 0.75f, 1.0f);
-    }
+    set_flat_color(scene, has_highlight ? g_theme.edge_faded : g_theme.edge);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, scene->ebo);
     glDrawElements(GL_LINES, scene->edge_index_count, GL_UNSIGNED_INT, 0);
 
     if (has_highlight && scene->highlight_index_count > 0) {
-        glUniform4f(scene->u_color, 0.35f, 0.75f, 1.0f, 1.0f);
+        set_flat_color(scene, g_theme.edge_highlight);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, scene->highlight_ebo);
         glDrawElements(GL_LINES, scene->highlight_index_count, GL_UNSIGNED_INT, 0);
     }
@@ -184,12 +187,12 @@ void gl_scene_draw(const GLScene *scene, const float *mvp, int highlight_index) 
     glUniform1i(scene->u_override, 1);
 
     if (highlight_index >= 0 && highlight_index < scene->point_count) {
-        glUniform4f(scene->u_color, 1.0f, 0.35f, 0.35f, 1.0f);
+        set_flat_color(scene, g_theme.node_selected);
         glDrawArrays(GL_POINTS, highlight_index, 1);
     }
 
     if (scene->cluster_point_count > 0) {
-        glUniform4f(scene->u_color, 0.35f, 0.95f, 0.45f, 1.0f); /* multi-select accent, green */
+        set_flat_color(scene, g_theme.node_cluster);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, scene->cluster_ebo);
         glDrawElements(GL_POINTS, scene->cluster_point_count, GL_UNSIGNED_INT, 0);
     }
@@ -213,11 +216,11 @@ void gl_scene_draw_axis(const GLScene *scene, const float *mvp, float length) {
     glBindBuffer(GL_ARRAY_BUFFER, scene->axis_vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_DYNAMIC_DRAW);
 
-    glUniform4f(scene->u_color, 0.85f, 0.25f, 0.25f, 1.0f); /* X = red */
+    set_flat_color(scene, g_theme.axis_x);
     glDrawArrays(GL_LINES, 0, 2);
-    glUniform4f(scene->u_color, 0.25f, 0.85f, 0.25f, 1.0f); /* Y = green */
+    set_flat_color(scene, g_theme.axis_y);
     glDrawArrays(GL_LINES, 2, 2);
-    glUniform4f(scene->u_color, 0.25f, 0.45f, 0.95f, 1.0f); /* Z = blue */
+    set_flat_color(scene, g_theme.axis_z);
     glDrawArrays(GL_LINES, 4, 2);
 
     glBindVertexArray(0);
