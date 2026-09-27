@@ -51,36 +51,13 @@ jobs:
         run: cmake --build build --config Release --parallel
 
       # codemap-view needs a real GPU/display to open a window, which no
-      # runner has, so it's only verified to build + link. codemap-build
-      # is headless and gets exercised for real against every language's
-      # fixtures plus a mixed-language walk. `set -e` + an explicit
-      # exit-code check means a failed run actually goes red (bash is
-      # available on all three runners, so one script covers every OS).
-      - name: Smoke-test codemap-build against all fixtures
-        shell: bash
-        run: |
-          set -euo pipefail
-          exe=$(find build -type f \( -name codemap-build -o -name codemap-build.exe \) | head -n1)
-          [ -n "$exe" ] || { echo "codemap-build not found in build output"; exit 1; }
-          echo "using: $exe"
-          run_fixture() {
-            "$exe" --root "$1" --out "$2"
-            [ -f "$2" ] || { echo "$2 was not created for root '$1'"; exit 1; }
-            cat "$2"
-          }
-          run_fixture test/fixtures/c      graph-c.json
-          run_fixture test/fixtures/csharp graph-csharp.json
-          run_fixture test/fixtures/lisp   graph-lisp.json
-          run_fixture test/fixtures/python graph-python.json
-          run_fixture test/fixtures/go     graph-go.json
-          run_fixture test/fixtures        graph-mixed.json
-
+      # runner has, so it's only verified to build + link.
       - name: Collect binaries
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist
-          for name in codemap-build codemap-view; do
+          for name in codemap-view; do
             f=$(find build -type f \( -name "$name" -o -name "$name.exe" \) | head -n1)
             [ -n "$f" ] || { echo "$name not found in build output"; exit 1; }
             cp "$f" dist/

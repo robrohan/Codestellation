@@ -1,6 +1,8 @@
 /* codemap-view: loads a graph.json (see graph/graph_json.h), lays it out
- * in 3D once at startup, and renders it as a navigable point/line scene
- * with a Nuklear side panel for inspecting a selected file's contents. */
+ * in 3D, and renders it as a navigable point/line scene with a Nuklear
+ * side panel for inspecting a selected file's contents. Properties > Open
+ * builds a new project's graph in-process (see project_build.h) and swaps
+ * it in without restarting. */
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -27,7 +29,7 @@
 #include "ui_panel.h"
 #include "note_compose.h"
 #include "properties_panel.h"
-#include "project_launcher.h"
+#include "project_build.h"
 #include "tinyfiledialogs.h"
 #include "labels.h"
 #include "panel_rect.h"
@@ -37,14 +39,6 @@
 #include "../notes/filehash.h"
 #include "../notes/overlay.h"
 #include "../notes/notes.h"
-
-#if defined(__APPLE__)
-#include <mach-o/dyld.h>
-#elif defined(_WIN32)
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
-#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -123,40 +117,122 @@ static char *derive_sibling_path(const char *graph_path, const char *suffix) {
     return out;
 }
 
-/* Resolved (symlink-free, absolute) path to this running executable --
- * used only if the Properties pane's Open button is ever clicked (see
- * project_launcher.h), to find the sibling codemap-build binary and to
- * relaunch. argv[0] alone isn't reliable (can be a bare name found via
- * PATH, or relative to a cwd that's since changed), so macOS gets the
- * real thing via _NSGetExecutablePath; elsewhere this falls back to
- * resolving argv[0] itself, "should work, not verified" like this
- * project's other non-macOS-specific paths. */
-static char *resolve_self_exe_path(const char *argv0) {
-#if defined(__APPLE__)
-    char buf[4096];
-    uint32_t size = sizeof(buf);
-    if (_NSGetExecutablePath(buf, &size) == 0) {
-        char *resolved = path_normalize(buf);
-        return resolved ? resolved : xstrdup(buf);
+/* Everything derived from one loaded graph.json, torn down and rebuilt as
+ * a unit when Properties > Open swaps in a different project. graph_path
+ * NULL (zero nodes, no sidecar paths) is the "nothing opened yet" state. */
+typedef struct {
+    char *graph_path;
+    char *overlay_path;
+    char *notes_path;
+    Graph graph;
+    Overlay overlay;
+    NoteSet notes;
+    Vec3 *positions;
+    float *colors;
+    unsigned int *edge_indices;
+} LoadedGraph;
+
+/* CPU side only -- needs no GL context, so main can call it before the
+ * window exists and fail out cleanly. graph_path NULL loads the empty
+ * state. Returns false (leaving *lg untouched) only if graph_path was
+ * given and couldn't be read. */
+static bool loaded_graph_load(LoadedGraph *lg, const char *graph_path) {
+    Graph graph;
+    if (graph_path) {
+        if (!graph_read_json(graph_path, &graph)) return false;
+        printf("loaded %zu nodes, %zu edges from %s\n", graph.node_count, graph.edge_count, graph_path);
+    } else {
+        graph_init(&graph);
     }
-#elif defined(_WIN32)
-    char buf[4096];
-    DWORD n = GetModuleFileNameA(NULL, buf, sizeof(buf));
-    if (n > 0 && n < sizeof(buf)) {
-        char *resolved = path_normalize(buf);
-        return resolved ? resolved : xstrdup(buf);
+
+    memset(lg, 0, sizeof(*lg));
+    lg->graph = graph;
+    lg->graph_path = graph_path ? xstrdup(graph_path) : NULL;
+    lg->overlay_path = graph_path ? derive_sibling_path(graph_path, ".overlay.json") : NULL;
+    lg->notes_path = graph_path ? derive_sibling_path(graph_path, ".notes.md") : NULL;
+
+    if (lg->overlay_path) {
+        if (!overlay_read_json(lg->overlay_path, &lg->overlay)) {
+            fprintf(stderr, "warning: could not parse %s, ignoring\n", lg->overlay_path);
+        }
+    } else {
+        overlay_init(&lg->overlay);
     }
-#endif
-    char *resolved = path_normalize(argv0);
-    return resolved ? resolved : xstrdup(argv0);
+
+    if (lg->notes_path) {
+        notes_read_md(lg->notes_path, &lg->notes);
+    } else {
+        notes_init(&lg->notes);
+    }
+
+    lg->positions = (Vec3 *)malloc(graph.node_count * sizeof(Vec3));
+    layout3d_compute(&lg->graph, lg->positions, 300);
+
+    /* Static per-node color (directory-derived) -- computed once here,
+     * never touched again (unlike positions, no per-drag update path). */
+    lg->colors = (float *)malloc(graph.node_count * 3 * sizeof(float));
+    dircolor_compute(&lg->graph, lg->colors);
+
+    /* Overlay any manually-dragged positions on top of the fresh layout.
+     * A hash mismatch (the file changed since the position was saved) is
+     * advisory, not blocking -- the position still applies. */
+    for (size_t i = 0; i < graph.node_count; i++) {
+        const OverlayEntry *e = overlay_find(&lg->overlay, lg->graph.nodes[i].path);
+        if (!e) continue;
+        lg->positions[i].x = e->x;
+        lg->positions[i].y = e->y;
+        lg->positions[i].z = e->z;
+        uint64_t current_hash;
+        if (file_content_hash(lg->graph.nodes[i].path, &current_hash) && current_hash != e->hash) {
+            printf("note: %s changed since its position was saved (possibly stale)\n", lg->graph.nodes[i].path);
+        }
+    }
+
+    lg->edge_indices = (unsigned int *)malloc(graph.edge_count * 2 * sizeof(unsigned int));
+    for (size_t i = 0; i < graph.edge_count; i++) {
+        lg->edge_indices[i * 2 + 0] = (unsigned int)graph.edges[i].source;
+        lg->edge_indices[i * 2 + 1] = (unsigned int)graph.edges[i].target;
+    }
+    return true;
+}
+
+static void loaded_graph_free(LoadedGraph *lg) {
+    free(lg->positions);
+    free(lg->colors);
+    free(lg->edge_indices);
+    graph_free(&lg->graph);
+    overlay_free(&lg->overlay);
+    notes_free(&lg->notes);
+    free(lg->graph_path);
+    free(lg->overlay_path);
+    free(lg->notes_path);
+    memset(lg, 0, sizeof(*lg));
+}
+
+/* GPU side of switching to lg: replaces the scene's buffers, clears the
+ * per-selection overlays (their node ids belonged to the old graph), and
+ * re-frames the camera on the new data. */
+static void loaded_graph_show(const LoadedGraph *lg, GLScene *scene, Camera *camera) {
+    gl_scene_upload(scene, (const float *)lg->positions, lg->colors, lg->graph.node_count,
+                    lg->edge_indices, lg->graph.edge_count);
+    gl_scene_set_highlighted_edges(scene, NULL, 0);
+    gl_scene_set_cluster_points(scene, NULL, 0);
+
+    camera_init(camera);
+    /* Fixed-distance default framed empty graphs badly and huge ones
+     * worse -- frame the actual data instead. A sphere of `radius`
+     * exactly fills the vertical field of view at
+     * distance = radius / sin(fovy/2); back off another 20% so
+     * boundary nodes aren't clipped right at the frustum edge. */
+    float radius = layout3d_bounding_radius(lg->positions, lg->graph.node_count);
+    if (radius > 0.1f) camera->distance = (radius / sinf(camera->fovy * 0.5f)) * 1.2f;
 }
 
 int main(int argc, char **argv) {
-    /* No graph.json is a valid way to launch now -- the Properties pane's
-     * Open button (see project_launcher.h) picks a directory, builds it,
-     * and execv()s a fresh copy of this same process with the result as
-     * argv[1], so the "real" startup path below only ever needs to
-     * handle "a graph.json was given" vs "nothing was given yet".
+    /* No graph.json is a valid way to launch -- the Properties pane's
+     * Open button builds a picked directory and swaps it in at runtime
+     * (see project_build.h), so startup only needs to handle "a
+     * graph.json was given" vs "nothing was given yet".
      *
      * Xcode's default scheme silently injects "-NSDocumentRevisionsDebugMode
      * YES" into every launched process's argv (a long-standing default for
@@ -174,67 +250,13 @@ int main(int argc, char **argv) {
         graph_path = argv[i];
         break;
     }
-    char *self_exe_path = resolve_self_exe_path(argv[0]);
 
-    Graph graph;
-    if (graph_path) {
-        if (!graph_read_json(graph_path, &graph)) {
-            fprintf(stderr, "error: could not read %s\n", graph_path);
-            return 1;
-        }
-        printf("loaded %zu nodes, %zu edges from %s\n", graph.node_count, graph.edge_count, graph_path);
-    } else {
-        graph_init(&graph);
-        printf("no project loaded -- use Properties > Open to pick a directory\n");
+    LoadedGraph lg;
+    if (!loaded_graph_load(&lg, graph_path)) {
+        fprintf(stderr, "error: could not read %s\n", graph_path);
+        return 1;
     }
-
-    char *overlay_path = graph_path ? derive_sibling_path(graph_path, ".overlay.json") : NULL;
-    char *notes_path = graph_path ? derive_sibling_path(graph_path, ".notes.md") : NULL;
-
-    Overlay overlay;
-    if (overlay_path) {
-        if (!overlay_read_json(overlay_path, &overlay)) {
-            fprintf(stderr, "warning: could not parse %s, ignoring\n", overlay_path);
-        }
-    } else {
-        overlay_init(&overlay);
-    }
-
-    NoteSet notes;
-    if (notes_path) {
-        notes_read_md(notes_path, &notes);
-    } else {
-        notes_init(&notes);
-    }
-
-    Vec3 *positions = (Vec3 *)malloc(graph.node_count * sizeof(Vec3));
-    layout3d_compute(&graph, positions, 300);
-
-    /* Static per-node color (directory-derived) -- computed once here,
-     * never touched again (unlike positions, no per-drag update path). */
-    float *colors = (float *)malloc(graph.node_count * 3 * sizeof(float));
-    dircolor_compute(&graph, colors);
-
-    /* Overlay any manually-dragged positions on top of the fresh layout.
-     * A hash mismatch (the file changed since the position was saved) is
-     * advisory, not blocking -- the position still applies. */
-    for (size_t i = 0; i < graph.node_count; i++) {
-        const OverlayEntry *e = overlay_find(&overlay, graph.nodes[i].path);
-        if (!e) continue;
-        positions[i].x = e->x;
-        positions[i].y = e->y;
-        positions[i].z = e->z;
-        uint64_t current_hash;
-        if (file_content_hash(graph.nodes[i].path, &current_hash) && current_hash != e->hash) {
-            printf("note: %s changed since its position was saved (possibly stale)\n", graph.nodes[i].path);
-        }
-    }
-
-    unsigned int *edge_indices = (unsigned int *)malloc(graph.edge_count * 2 * sizeof(unsigned int));
-    for (size_t i = 0; i < graph.edge_count; i++) {
-        edge_indices[i * 2 + 0] = (unsigned int)graph.edges[i].source;
-        edge_indices[i * 2 + 1] = (unsigned int)graph.edges[i].target;
-    }
+    if (!graph_path) printf("no project loaded -- use Properties > Open to pick a directory\n");
 
     if (!glfwInit()) {
         fprintf(stderr, "error: glfwInit failed\n");
@@ -271,19 +293,13 @@ int main(int argc, char **argv) {
 
     GLScene scene;
     gl_scene_init(&scene);
-    gl_scene_upload(&scene, (const float *)positions, colors, graph.node_count, edge_indices, graph.edge_count);
 
     Camera camera;
-    camera_init(&camera);
-    {
-        /* Fixed-distance default framed empty graphs badly and huge ones
-         * worse -- frame the actual data instead. A sphere of `radius`
-         * exactly fills the vertical field of view at
-         * distance = radius / sin(fovy/2); back off another 20% so
-         * boundary nodes aren't clipped right at the frustum edge. */
-        float radius = layout3d_bounding_radius(positions, graph.node_count);
-        if (radius > 0.1f) camera.distance = (radius / sinf(camera.fovy * 0.5f)) * 1.2f;
-    }
+    loaded_graph_show(&lg, &scene, &camera);
+
+    /* In-flight Properties > Open build, if any -- polled once per frame
+     * below; the old graph stays fully usable until the new one is ready. */
+    ProjectBuild *build = NULL;
 
     int selected = -1;
     int drag_node = -1;
@@ -340,6 +356,33 @@ int main(int argc, char **argv) {
         glfwPollEvents();
         if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
             glfwSetWindowShouldClose(win, GLFW_TRUE);
+        }
+
+        /* Swap in a finished Open build at the top of the frame, before
+         * anything below reads node ids or positions, so no frame ever
+         * mixes old and new graph state. Every piece of per-graph
+         * interaction state is reset: its node ids belonged to the old
+         * graph. */
+        if (build && project_build_is_done(build)) {
+            char *new_graph_path = project_build_finish(build);
+            build = NULL;
+            if (new_graph_path) {
+                LoadedGraph next;
+                if (loaded_graph_load(&next, new_graph_path)) {
+                    loaded_graph_free(&lg);
+                    lg = next;
+                    loaded_graph_show(&lg, &scene, &camera);
+                    selected = -1;
+                    drag_node = -1;
+                    interact = INTERACT_NONE;
+                    cluster_count = 0;
+                    note_compose_close();
+                } else {
+                    tinyfd_messageBox("Codestellation", "The project built, but its graph.json could not be read.",
+                                      "ok", "error", 1);
+                }
+                free(new_graph_path);
+            }
         }
 
         nk_glfw3_new_frame(&glfw_nk);
@@ -424,7 +467,7 @@ int main(int argc, char **argv) {
             /* Left button: always reposition-drag on a node, or orbit on
              * empty space -- never touches selection. */
             if (left_pressed_edge && !over_panel) {
-                int hit = pick_nearest_node(view_proj, positions, graph.node_count, width, height,
+                int hit = pick_nearest_node(view_proj, lg.positions, lg.graph.node_count, width, height,
                                              (float)mx, (float)my, PICK_RADIUS_PX);
                 if (hit >= 0) {
                     drag_node = hit;
@@ -458,7 +501,7 @@ int main(int argc, char **argv) {
                  * select/deselect click, not a pan -- act on it now,
                  * at release, using the current cursor position. */
                 if (interact == INTERACT_PAN && pan_via_right && !moved_since_press) {
-                    int hit = pick_nearest_node(view_proj, positions, graph.node_count, width, height,
+                    int hit = pick_nearest_node(view_proj, lg.positions, lg.graph.node_count, width, height,
                                                  (float)mx, (float)my, PICK_RADIUS_PX);
                     if (cluster_modifier_at_press) {
                         /* Building/editing a cluster -- independent of
@@ -469,7 +512,7 @@ int main(int argc, char **argv) {
                         }
                     } else {
                         selected = hit;
-                        rebuild_highlighted_edges(&scene, &graph, selected);
+                        rebuild_highlighted_edges(&scene, &lg.graph, selected);
                         /* Plain select is the obvious way back out of group
                          * mode -- clear the cluster rather than leaving it
                          * active alongside a new single selection. */
@@ -483,10 +526,10 @@ int main(int argc, char **argv) {
                      * "if I move something it stays there" true with no
                      * separate save step. */
                     uint64_t h;
-                    if (file_content_hash(graph.nodes[drag_node].path, &h)) {
-                        overlay_set(&overlay, graph.nodes[drag_node].path, h,
-                                    positions[drag_node].x, positions[drag_node].y, positions[drag_node].z);
-                        overlay_write_json(&overlay, overlay_path);
+                    if (file_content_hash(lg.graph.nodes[drag_node].path, &h)) {
+                        overlay_set(&lg.overlay, lg.graph.nodes[drag_node].path, h,
+                                    lg.positions[drag_node].x, lg.positions[drag_node].y, lg.positions[drag_node].z);
+                        overlay_write_json(&lg.overlay, lg.overlay_path);
                     }
                 }
                 interact = INTERACT_NONE;
@@ -506,9 +549,9 @@ int main(int argc, char **argv) {
                     Vec3 ray_origin, ray_dir;
                     camera_ray(&camera, ndc_x, ndc_y, aspect, &ray_origin, &ray_dir);
                     Vec3 new_pos;
-                    if (ray_plane_intersect(ray_origin, ray_dir, positions[drag_node], drag_plane_normal, &new_pos)) {
-                        positions[drag_node] = new_pos;
-                        gl_scene_update_positions(&scene, (const float *)positions, graph.node_count);
+                    if (ray_plane_intersect(ray_origin, ray_dir, lg.positions[drag_node], drag_plane_normal, &new_pos)) {
+                        lg.positions[drag_node] = new_pos;
+                        gl_scene_update_positions(&scene, (const float *)lg.positions, lg.graph.node_count);
                     }
                 }
                 last_mouse_x = mx;
@@ -531,31 +574,52 @@ int main(int argc, char **argv) {
         char *picked_dir = NULL;
         bool export_notes_clicked = false;
         {
-            const char *sel_path = selected >= 0 ? graph.nodes[selected].path : NULL;
-            const char *sel_lang = selected >= 0 ? graph.nodes[selected].language : NULL;
+            const char *sel_path = selected >= 0 ? lg.graph.nodes[selected].path : NULL;
+            const char *sel_lang = selected >= 0 ? lg.graph.nodes[selected].language : NULL;
 
             if (cluster_count > cluster_paths_cap) {
                 cluster_paths_cap = cluster_count;
                 cluster_paths = (const char **)realloc((void *)cluster_paths, cluster_paths_cap * sizeof(char *));
             }
-            for (size_t i = 0; i < cluster_count; i++) cluster_paths[i] = graph.nodes[cluster_ids[i]].path;
+            for (size_t i = 0; i < cluster_count; i++) cluster_paths[i] = lg.graph.nodes[cluster_ids[i]].path;
 
             ui_panel_draw(ctx, width, height, sel_path, sel_lang, cluster_paths, cluster_count,
-                          &notes, notes_path, &inspector_bounds);
-            note_compose_draw(ctx, &notes, notes_path, &note_bounds);
-            picked_dir = properties_panel_draw(ctx, &show_origin, notes_path != NULL,
+                          &lg.notes, lg.notes_path, &inspector_bounds);
+            note_compose_draw(ctx, &lg.notes, lg.notes_path, &note_bounds);
+            picked_dir = properties_panel_draw(ctx, &show_origin, lg.notes_path != NULL,
                                                 &export_notes_clicked, &properties_bounds);
             labels_draw(ctx, width, height, inspector_bounds, note_bounds, properties_bounds,
-                        view_proj, positions, &graph, &notes, selected);
+                        view_proj, lg.positions, &lg.graph, &lg.notes, selected);
+
+            if (build) {
+                /* Small status strip, bottom-center. nk_begin only honours
+                 * the rect when the window is first created, which is
+                 * each time a build starts (it's dropped once not drawn). */
+                const float bw = 480.0f, bh = 44.0f;
+                if (nk_begin(ctx, "##building", nk_rect(((float)width - bw) * 0.5f, (float)height - bh - 16.0f, bw, bh),
+                             NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_NO_INPUT)) {
+                    nk_layout_row_dynamic(ctx, 24, 1);
+                    nk_labelf(ctx, NK_TEXT_CENTERED, "Building %s ...", project_build_root(build));
+                }
+                nk_end(ctx);
+            }
         }
 
-        if (export_notes_clicked && notes_path) {
+        if (picked_dir) {
+            /* One build at a time -- the pipeline isn't reentrant. A
+             * second Open while one is running is dropped; the status
+             * strip already shows what's in progress. */
+            if (!build) build = project_build_start(picked_dir);
+            free(picked_dir);
+        }
+
+        if (export_notes_clicked && lg.notes_path) {
             /* graph.notes.md lives under Application Support, easy to
              * lose track of -- tinyfd_saveFileDialog + a plain copy gets
              * a copy somewhere the user will actually find it. */
             const char *dest = tinyfd_saveFileDialog("Export Notes", "notes.md", 0, NULL, NULL);
             if (dest) {
-                FILE *in = fopen(notes_path, "rb");
+                FILE *in = fopen(lg.notes_path, "rb");
                 FILE *out = in ? fopen(dest, "wb") : NULL;
                 bool ok = false;
                 if (in && out) {
@@ -584,45 +648,19 @@ int main(int argc, char **argv) {
         nk_glfw3_render(&glfw_nk, NK_ANTI_ALIASING_ON, MAX_VERTEX_BUFFER, MAX_ELEMENT_BUFFER);
         glfwSwapBuffers(win);
 
-        if (picked_dir) {
-            /* One extra, ad-hoc frame -- not part of the persistent
-             * window set above, just a status screen shown once before
-             * blocking on the (synchronous) build -- so it doesn't need
-             * any of the focus/z-order care those windows do. */
-            nk_glfw3_new_frame(&glfw_nk);
-            if (nk_begin(ctx, "##building", nk_rect(0, 0, (float)width, (float)height),
-                         NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_NO_INPUT)) {
-                nk_layout_row_dynamic(ctx, 30, 1);
-                nk_labelf(ctx, NK_TEXT_CENTERED, "Building %s ...", picked_dir);
-            }
-            nk_end(ctx);
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-            nk_glfw3_render(&glfw_nk, NK_ANTI_ALIASING_ON, MAX_VERTEX_BUFFER, MAX_ELEMENT_BUFFER);
-            glfwSwapBuffers(win);
-
-            /* Blocks; on success this execv()s a fresh process and never
-             * returns. On failure it's already shown a native error
-             * dialog, so just fall back into the normal loop. */
-            project_launcher_build_and_relaunch(self_exe_path, picked_dir);
-            free(picked_dir);
-        }
     }
 
+    /* A build still running at quit is abandoned rather than joined --
+     * a big codebase could take a long while, and process exit ends the
+     * worker anyway. Its half-written graph.json only matters if someone
+     * later passes that exact file on the command line. */
     gl_scene_destroy(&scene);
     ui_panel_shutdown();
     nk_glfw3_shutdown(&glfw_nk);
     glfwTerminate();
 
-    free(positions);
-    free(colors);
-    free(edge_indices);
-    graph_free(&graph);
-    overlay_free(&overlay);
-    notes_free(&notes);
+    loaded_graph_free(&lg);
     free(cluster_ids);
     free((void *)cluster_paths);
-    free(overlay_path);
-    free(notes_path);
-    free(self_exe_path);
     return 0;
 }

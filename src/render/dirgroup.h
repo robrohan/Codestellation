@@ -7,8 +7,8 @@
 /* Longest common directory-prefix (byte length, snapped to the last path
  * separator) shared by every node's path in the graph -- the effective
  * "root" for coarse grouping, since paths aren't normalized and may be
- * absolute or relative depending on how `codemap-build --root ...` was
- * invoked (an absolute path's first couple of segments are just
+ * absolute or relative depending on the root the graph was built
+ * from (an absolute path's first couple of segments are just
  * "/Users/you", not anything meaningful). Shared by dircolor.c (coarse
  * color) and layout3d.c (coarse cluster anchor) so both use the exact
  * same grouping -- see dirgroup.c's top comment for exactly how the key

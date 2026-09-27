@@ -78,6 +78,8 @@ void note_compose_open_edit(const Note *note) {
 
 bool note_compose_is_open(void) { return g_open; }
 
+void note_compose_close(void) { reset(); }
+
 /* No word-wrap exists anywhere in Nuklear's edit widget (confirmed by
  * reading its row-layout code directly -- it only ever breaks a row on a
  * literal '\n'). Rather than patching nuklear.h a fourth time to add a

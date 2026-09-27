@@ -6,12 +6,12 @@ Walks a codebase, extracts cross-file dependencies with tree-sitter, and
 renders them as an interactive 3D graph in native OpenGL + Nuklear.
 Built for digging through unfamiliar/legacy multi-language codebases.
 
-Two binaries:
-- `codemap-build` -- headless CLI. Walks a directory (recursively, mixed
-  languages in one tree are fine), parses each file with the matching
-  language adapter, and writes a dependency graph to `graph.json`.
-- `codemap-view` -- loads a `graph.json`, lays it out in 3D once at
-  startup, and opens a window to explore it.
+One app, `codemap-view`: Properties > Open picks a directory, walks it
+(recursively, mixed languages in one tree are fine), parses each file with
+the matching language adapter, builds a dependency graph in the background,
+and loads it into the 3D view -- no restart. The graph is cached as
+`graph.json` in a per-project folder under
+`~/Library/Application Support/Codestellation/`.
 
 Currently supported languages: **C** (`.c`/`.h`, `#include`-based),
 **C#** (`.cs`, namespace/type declarations + `using`-qualified
@@ -56,11 +56,9 @@ build from the CLI with `cmake --build build-xcode --config Debug`.
 Editing `CMakeLists.txt` re-runs CMake automatically on the next build
 via the generated `ZERO_CHECK` target.
 
-This produces an ad-hoc-signed `codemap-view.app` (with `codemap-build`
-embedded next to its executable) that runs straight from Xcode's Run
-button. Hardened runtime is deliberately off here: with it on, Xcode's
-injected `DYLD_*` environment makes dyld kill the fresh process that
-Properties > Open spawns via `execv`.
+This produces an ad-hoc-signed `Codestellation.app` that runs straight
+from Xcode's Run button. Hardened runtime is deliberately off here, since
+it refuses the `DYLD_*` injection Xcode's debugger relies on.
 
 For a Developer-ID-signed, hardened-runtime `.app` to hand to another
 Mac:
@@ -76,8 +74,8 @@ Don't Run that build from Xcode -- launch the built `.app` directly
 ## Run
 
 ```
-./build/src/codemap-build --root <your-codebase-dir> --out graph.json
-./build/src/codemap-view graph.json
+./build/src/codemap-view              # then Properties > Open...
+./build/src/codemap-view graph.json   # or open a previously built graph
 ```
 
 In the viewer: left-drag empty space to orbit, scroll to zoom, click a
@@ -85,7 +83,8 @@ node to inspect its file in the right-hand panel, drag a node to
 reposition it (it stays put -- layout is computed once at load, not a
 continuous simulation). Esc to quit.
 
-Optional sanity check of the graph output itself (needs networkx):
+Optional sanity check of a built graph (needs networkx), pointed at the
+cached `graph.json` in the project's Application Support folder:
 ```
 python3 scripts/sanity_check.py graph.json
 ```
@@ -114,7 +113,7 @@ language by name, only through that interface. To add one: pick a
 tree-sitter grammar, fetch it in the top-level `CMakeLists.txt`
 (mirroring the existing `ts_c`/`ts_csharp`/`ts_lisp`/`ts_python`/`ts_go`
 blocks), add the adapter `.c` and its `tree_sitter_*` library to
-`src/CMakeLists.txt`'s `codemap-build` target, register it in
+`src/CMakeLists.txt`'s `Codestellation` target, register it in
 `src/lang/registry.c`, and write an adapter implementing
 `extract_declarations`/`extract_references`/`resolve_reference`.
 `src/lang/c/c_adapter.c` is the simplest example (no symbol table,

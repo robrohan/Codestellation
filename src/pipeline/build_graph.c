@@ -1,3 +1,4 @@
+#include "build_graph.h"
 #include "walk.h"
 #include "parse.h"
 #include "resolve.h"
@@ -5,17 +6,8 @@
 #include "../graph/graph.h"
 #include "../graph/graph_json.h"
 #include <stdio.h>
-#include <string.h>
 
-int main(int argc, char **argv) {
-    if (argc < 3 || strcmp(argv[1], "--root") != 0) {
-        fprintf(stderr, "usage: %s --root <dir> [--out <graph.json>]\n", argv[0]);
-        return 1;
-    }
-    const char *root = argv[2];
-    const char *out_path = "graph.json";
-    if (argc >= 5 && strcmp(argv[3], "--out") == 0) out_path = argv[4];
-
+bool build_graph_json(const char *root, const char *out_path) {
     adapter_registry_init();
 
     FileList files;
@@ -25,7 +17,9 @@ int main(int argc, char **argv) {
     ParsedFileList parsed;
     if (!parse_all(&files, &parsed)) {
         fprintf(stderr, "error: parse_all failed\n");
-        return 1;
+        parsed_file_list_free(&parsed);
+        filelist_free(&files);
+        return false;
     }
     printf("parsed %zu files\n", parsed.count);
 
@@ -36,14 +30,12 @@ int main(int argc, char **argv) {
     printf("graph: %zu nodes, %zu edges (%d unresolved references)\n",
            graph.node_count, graph.edge_count, unresolved);
 
-    if (!graph_write_json(&graph, out_path)) {
-        fprintf(stderr, "error: failed to write %s\n", out_path);
-        return 1;
-    }
-    printf("wrote %s\n", out_path);
+    bool ok = graph_write_json(&graph, out_path);
+    if (ok) printf("wrote %s\n", out_path);
+    else fprintf(stderr, "error: failed to write %s\n", out_path);
 
     graph_free(&graph);
     parsed_file_list_free(&parsed);
     filelist_free(&files);
-    return 0;
+    return ok;
 }
