@@ -25,6 +25,7 @@ typedef struct {
 
     /* Label overlay (labels.c) */
     ThemeColor label_text;
+    ThemeColor label_shadow;    /* drawn 1px down-right, under the text */
     ThemeColor note_dot;
 } Theme;
 

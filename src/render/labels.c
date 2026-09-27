@@ -104,6 +104,10 @@ void labels_draw(struct nk_context *ctx, int window_width, int window_height,
             float text_w = font ? font->width(font->userdata, font->height, name, len) : (float)(len * 6);
 
             struct nk_rect r = nk_rect(lc->sx - text_w * 0.5f, lc->sy - 20.0f, text_w + 4.0f, 16.0f);
+            /* A 1px drop shadow keeps labels legible where they cross
+             * edges and bright nodes. */
+            struct nk_rect shadow = nk_rect(r.x + 1.0f, r.y + 1.0f, r.w, r.h);
+            nk_draw_text(canvas, shadow, name, len, font, nk_rgba(0, 0, 0, 0), theme_nk(g_theme.label_shadow));
             nk_draw_text(canvas, r, name, len, font, nk_rgba(0, 0, 0, 0), theme_nk(g_theme.label_text));
 
             if (lc->has_note) {
