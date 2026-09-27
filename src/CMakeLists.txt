@@ -1,12 +1,43 @@
-add_executable(codemap-build
+# Fonts are compiled into the binary (no runtime resource lookup, same on
+# every platform): each TTF becomes a generated C array, regenerated when
+# the TTF changes. See render/fonts.c.
+set(CODEMAP_FONT_SOURCES)
+foreach(_font
+        "font_inter_regular:Inter-Regular.ttf"
+        "font_inter_bold:Inter-Bold.ttf"
+        "font_inter_italic:Inter-Italic.ttf"
+        "font_jetbrains_mono:JetBrainsMono-Regular.ttf")
+    string(REPLACE ":" ";" _parts "${_font}")
+    list(GET _parts 0 _sym)
+    list(GET _parts 1 _file)
+    set(_in "${CMAKE_SOURCE_DIR}/vendor/fonts/${_file}")
+    set(_out "${CMAKE_CURRENT_BINARY_DIR}/generated/${_sym}.c")
+    add_custom_command(
+        OUTPUT "${_out}"
+        COMMAND ${CMAKE_COMMAND} -DIN=${_in} -DOUT=${_out} -DNAME=${_sym} -P "${CMAKE_SOURCE_DIR}/cmake/embed_file.cmake"
+        DEPENDS "${_in}" "${CMAKE_SOURCE_DIR}/cmake/embed_file.cmake"
+        COMMENT "Embedding ${_file}"
+        VERBATIM)
+    list(APPEND CODEMAP_FONT_SOURCES "${_out}")
+endforeach()
+
+# One binary: the viewer builds project graphs in-process (see
+# render/project_build.c), so the tree-sitter pipeline is linked straight in.
+add_executable(Codestellation
     common/pathutil.c
     common/symtab.c
+    common/thread.c
+    common/code_cache.c
     graph/graph.c
     graph/graph_json.c
+    canvas/canvas_doc.c
+    canvas/project.c
+    canvas/canvas_index.c
+    canvas/export.c
     pipeline/walk.c
     pipeline/parse.c
     pipeline/resolve.c
-    pipeline/build_graph_cli.c
+    pipeline/build_graph.c
     lang/registry.c
     lang/c/c_adapter.c
     lang/csharp/csharp_adapter.c
@@ -15,18 +46,6 @@ add_executable(codemap-build
     lang/go/go_adapter.c
     lang/php/php_adapter.c
     lang/vbnet/vbnet_adapter.c
-)
-
-target_include_directories(codemap-build PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/vendor/json
-)
-target_link_libraries(codemap-build PRIVATE tree-sitter tree_sitter_c tree_sitter_csharp tree_sitter_lisp tree_sitter_python tree_sitter_go tree_sitter_php tree_sitter_vbnet)
-
-add_executable(Codestellation
-    common/pathutil.c
-    graph/graph.c
-    graph/graph_json.c
     notes/filehash.c
     notes/overlay.c
     notes/notes.c
@@ -40,9 +59,14 @@ add_executable(Codestellation
     render/ui_panel.c
     render/note_compose.c
     render/properties_panel.c
-    render/project_launcher.c
+    render/project_build.c
     render/labels.c
     render/panel_rect.c
+    render/theme.c
+    render/fonts.c
+    render/md_render.c
+    render/canvas_view.c
+    ${CODEMAP_FONT_SOURCES}
     ${CMAKE_SOURCE_DIR}/vendor/tinyfiledialogs/tinyfiledialogs.c
 )
 target_include_directories(Codestellation PRIVATE
@@ -52,7 +76,10 @@ target_include_directories(Codestellation PRIVATE
     ${CMAKE_SOURCE_DIR}/vendor/json
     ${CMAKE_SOURCE_DIR}/vendor/tinyfiledialogs
 )
-target_link_libraries(Codestellation PRIVATE glfw OpenGL::GL)
+find_package(Threads REQUIRED)
+target_link_libraries(Codestellation PRIVATE glfw OpenGL::GL Threads::Threads
+    tree-sitter tree_sitter_c tree_sitter_csharp tree_sitter_lisp tree_sitter_python
+    tree_sitter_go tree_sitter_php tree_sitter_vbnet)
 
 # The CMake *target* is named Codestellation (so the Xcode generator's
 # auto-created scheme/product picker shows that instead of a stale
@@ -60,8 +87,8 @@ target_link_libraries(Codestellation PRIVATE glfw OpenGL::GL)
 # but the everyday `cmake -B build` (Unix Makefiles/Ninja) dev build should
 # keep producing the same plain "codemap-view" executable it always has --
 # nothing else references the target name, only this OUTPUT_NAME, and nothing
-# in this codebase's runtime logic (project_launcher.c's sibling-codemap-build
-# lookup, etc.) depends on it either way. The Xcode-gated block below
+# in this codebase's runtime logic depends on it either way. The Xcode-gated
+# block below
 # overrides this back to "Codestellation" for that build specifically.
 set_target_properties(Codestellation PROPERTIES OUTPUT_NAME "codemap-view")
 
@@ -77,17 +104,14 @@ if(NOT APPLE)
 endif()
 
 # macOS Xcode build: `cmake -S . -B build-xcode -G Xcode` turns Codestellation
-# into a real .app bundle (and embeds codemap-build next to it -- see below).
+# into a real .app bundle.
 # Gated on the Xcode generator specifically so the everyday
 # `cmake -S . -B build` (Unix Makefiles/Ninja) dev build keeps producing a
 # bare, ad-hoc-signed executable exactly as it always has.
 #
 # By default this bundle is ad-hoc signed with hardened runtime OFF, so it
-# runs straight from Xcode's Run button. Hardened runtime + Xcode's injected
-# DYLD_* environment is fatal to the Properties > Open flow: that path
-# execv()s a fresh copy of Codestellation (project_launcher.c), the child
-# inherits Xcode's DYLD_INSERT_LIBRARIES etc., and dyld aborts it on launch
-# because hardened runtime forbids those insertions.
+# runs straight from Xcode's Run button (hardened runtime refuses the
+# DYLD_* injection Xcode's debugger relies on).
 #
 # Pass -DCODESTELLATION_DIST=ON for a Developer-ID-signed, hardened-runtime
 # .app you can hand to another Mac. Don't Run that one from Xcode -- build it,
@@ -96,8 +120,15 @@ endif()
 option(CODESTELLATION_DIST "macOS: Developer-ID sign + hardened runtime for distribution" OFF)
 
 if(APPLE AND CMAKE_GENERATOR STREQUAL "Xcode")
+    # App icon, copied into Contents/Resources. Regenerate it with
+    # scripts/make_icon.py (the .icns is committed so builds don't need it).
+    set(CODEMAP_ICON "${CMAKE_SOURCE_DIR}/resources/macos/Codestellation.icns")
+    target_sources(Codestellation PRIVATE "${CODEMAP_ICON}")
+    set_source_files_properties("${CODEMAP_ICON}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+
     set_target_properties(Codestellation PROPERTIES
         OUTPUT_NAME "Codestellation"
+        MACOSX_BUNDLE_ICON_FILE "Codestellation.icns"
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_BUNDLE_NAME "Codestellation"
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.robrohan.codestellation.codemap-view"
@@ -117,52 +148,22 @@ if(APPLE AND CMAKE_GENERATOR STREQUAL "Xcode")
     )
 
     if(CODESTELLATION_DIST)
-        foreach(_codemap_target Codestellation codemap-build)
-            set_target_properties(${_codemap_target} PROPERTIES
-                XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Manual"
-                XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Developer ID Application"
-                XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "96MW2MVPWL"
-                XCODE_ATTRIBUTE_ENABLE_HARDENED_RUNTIME "YES"
-            )
-        endforeach()
+        set_target_properties(Codestellation PROPERTIES
+            XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Manual"
+            XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Developer ID Application"
+            XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "96MW2MVPWL"
+            XCODE_ATTRIBUTE_ENABLE_HARDENED_RUNTIME "YES"
+            # Notarization requires a secure timestamp on the signature.
+            XCODE_ATTRIBUTE_OTHER_CODE_SIGN_FLAGS "--timestamp"
+        )
     else()
         # Local dev: sign to run locally, no hardened runtime.
-        foreach(_codemap_target Codestellation codemap-build)
-            set_target_properties(${_codemap_target} PROPERTIES
-                XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Manual"
-                XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "-"
-                XCODE_ATTRIBUTE_ENABLE_HARDENED_RUNTIME "NO"
-            )
-        endforeach()
+        set_target_properties(Codestellation PROPERTIES
+            XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Manual"
+            XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "-"
+            XCODE_ATTRIBUTE_ENABLE_HARDENED_RUNTIME "NO"
+        )
     endif()
-
-    # Codestellation's Properties pane can build+open an arbitrary directory
-    # at runtime (project_launcher.c), which shells out to a sibling
-    # `codemap-build` found next to its own executable -- true for the
-    # everyday dev build (both land in the same flat output directory),
-    # but NOT for this bundle: Codestellation's real executable lives at
-    # Contents/MacOS/Codestellation, disconnected from wherever
-    # codemap-build was built. Embed a copy of codemap-build right next to
-    # it so the same "look next to me" runtime logic keeps working
-    # unmodified, then re-sign the whole bundle -- signing must happen
-    # *after* embedding or the bundle's own seal won't cover the
-    # copied-in binary.
-    # For a distribution build, a literal "Developer ID Application"
-    # identity string is ambiguous on a keychain holding more than one
-    # certificate with that same display name (a stale/renewed duplicate,
-    # e.g.) -- codesign then refuses to guess. $EXPANDED_CODE_SIGN_IDENTITY
-    # is the specific identity Xcode itself already resolved
-    # CODE_SIGN_IDENTITY to for this very target (exported into every Run
-    # Script phase's environment), so reusing it here can't be ambiguous.
-    # For a local build that resolves to "-" (ad-hoc), which is equally
-    # unambiguous.
-    add_custom_command(TARGET Codestellation POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:codemap-build>
-            $<TARGET_FILE_DIR:Codestellation>/codemap-build
-        COMMAND /bin/sh -c "codesign --force --deep --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" '$<TARGET_BUNDLE_DIR:Codestellation>'"
-        COMMENT "Embedding codemap-build into Codestellation.app and re-sealing the bundle"
-    )
 
     # Xcode's Archive action only copies a target's product into the
     # resulting .xcarchive's Products/ folder for targets with an
@@ -174,8 +175,6 @@ if(APPLE AND CMAKE_GENERATOR STREQUAL "Xcode")
     # without this line left Products/ completely empty), but Xcode's
     # Organizer then has no actual .app to sign for export or distribute --
     # which is exactly "Archive doesn't make a .app" / "can't sign the
-    # binary". codemap-build doesn't need its own install() entry -- it's
-    # already embedded inside Codestellation.app by the POST_BUILD step
-    # above, so it comes along for free with Codestellation's.
+    # binary".
     install(TARGETS Codestellation BUNDLE DESTINATION .)
 endif()

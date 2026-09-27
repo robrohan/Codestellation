@@ -1,4 +1,21 @@
 cmake_minimum_required(VERSION 3.21)
+
+# macOS: both of these must be set before project(). Without a deployment
+# target the binary's minimum OS is whatever SDK built it (i.e. the build
+# machine's macOS), so a signed .app wouldn't launch on anything older.
+# 12.0 is the oldest current Xcode (27) will target. The Xcode build -- the one
+# that gets signed and handed to other Macs -- is universal by default;
+# the everyday Makefile/Ninja build stays native-only for speed. Both can
+# be overridden with -D on the command line.
+# (FORCE only when empty: a build folder configured before this existed
+# has an empty entry cached, which a plain CACHE set wouldn't replace.)
+if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version" FORCE)
+endif()
+if(CMAKE_GENERATOR STREQUAL "Xcode" AND NOT CMAKE_OSX_ARCHITECTURES)
+    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS architectures" FORCE)
+endif()
+
 project(Codestellation C)
 
 set(CMAKE_C_STANDARD 11)

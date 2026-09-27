@@ -558,8 +558,15 @@ nk_glfw3_new_frame(struct nk_glfw* glfw)
     nk_input_key(ctx, NK_KEY_SHIFT, glfwGetKey(win, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS||
                                     glfwGetKey(win, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS);
 
+    /* Codestellation patch: on macOS, Cmd is the shortcut modifier
+     * (Cmd+C/V/X/Z/A), so accept it alongside Ctrl. */
     if (glfwGetKey(win, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
-        glfwGetKey(win, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS) {
+        glfwGetKey(win, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS
+#ifdef __APPLE__
+        || glfwGetKey(win, GLFW_KEY_LEFT_SUPER) == GLFW_PRESS
+        || glfwGetKey(win, GLFW_KEY_RIGHT_SUPER) == GLFW_PRESS
+#endif
+        ) {
         /* Note these are physical keys and won't respect any layouts/key mapping */
         if (k_state[NK_KEY_COPY] >= 0) nk_input_key(ctx, NK_KEY_COPY, k_state[NK_KEY_COPY]);
         if (k_state[NK_KEY_PASTE] >= 0) nk_input_key(ctx, NK_KEY_PASTE, k_state[NK_KEY_PASTE]);

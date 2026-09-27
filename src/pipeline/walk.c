@@ -27,5 +27,9 @@ static void collect_fn(const char *path, void *ctx) {
 
 void walk_project(const char *root, FileList *out) {
     filelist_init(out);
-    walk_directory(root, collect_fn, out);
+    walk_project_append(root, out);
+}
+
+void walk_project_append(const char *root, FileList *list) {
+    walk_directory(root, collect_fn, list);
 }

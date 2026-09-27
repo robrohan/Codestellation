@@ -9,6 +9,7 @@
 
 #include "ui_panel.h"
 #include "note_compose.h"
+#include "fonts.h"
 #include "../common/pathutil.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +28,16 @@ static char *g_cached_content = NULL;
  * position from a previously-viewed file can't leak into a note on a
  * file the user hasn't clicked into yet. */
 static int g_content_cursor = -1;
+
+/* The preview's own edit state. nk_edit_string keeps a text box's scroll
+ * position only while it has focus, so clicking "+ Add note" used to snap
+ * the preview back to the top of the file -- losing exactly the context
+ * the note is about. Owning the nk_text_edit (drawn with nk_edit_buffer)
+ * keeps scroll and cursor across focus changes. Re-initialized whenever
+ * g_content_gen moves on (a different file loaded). */
+static struct nk_text_edit g_view;
+static unsigned g_content_gen = 0;
+static unsigned g_view_gen = (unsigned)-1;
 
 /* Two-step delete confirmation for the notes list -- see draw_note_row.
  * Reset whenever the selection context changes so an armed "Confirm?" on
@@ -80,6 +91,7 @@ static void load_file_if_needed(const char *path) {
     g_cached_path = NULL;
     g_cached_content = NULL;
     g_content_cursor = -1;
+    g_content_gen++;
     if (!path) return;
 
     g_cached_path = xstrdup(path);
@@ -237,18 +249,24 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h,
     if (content_h < 60.0f) content_h = 60.0f;
 
     nk_layout_row_dynamic(ctx, content_h, 1);
-    size_t len = g_cached_content ? strlen(g_cached_content) : 0;
-    nk_flags edit_state = nk_edit_string_zero_terminated(
-        ctx, NK_EDIT_BOX | NK_EDIT_READ_ONLY, g_cached_content ? g_cached_content : "",
-        (int)(len + 1), nk_filter_default);
-    /* NK_EDIT_ACTIVE means this widget has focus (was clicked into) this
-     * very frame -- ctx->current->edit.cursor was just freshly written by
-     * the call above in that case, so it's safe to read here. Stashed into
-     * our own static rather than re-read later, since nuklear itself
-     * doesn't reset it on blur but also won't hand it back through any
-     * public accessor once this widget stops being the active one -- see
-     * g_content_cursor's own comment. */
-    if (edit_state & NK_EDIT_ACTIVE) g_content_cursor = ctx->current->edit.cursor;
+    if (g_view_gen != g_content_gen) {
+        /* Read-only, so pointing the fixed buffer straight at the cached
+         * text (or a literal) is safe -- nothing ever writes through it. */
+        char *src = g_cached_content ? g_cached_content : (char *)"";
+        int len = (int)strlen(src);
+        nk_textedit_init_fixed(&g_view, src, (nk_size)len + 1);
+        g_view.single_line = 0; /* init_fixed defaults to single-line; up/down need multi */
+        g_view.string.buffer.allocated = (nk_size)len;
+        g_view.string.len = nk_utf_len(src, len);
+        g_view_gen = g_content_gen;
+    }
+    nk_style_push_font(ctx, fonts_mono());
+    nk_flags edit_state = nk_edit_buffer(ctx, NK_EDIT_BOX | NK_EDIT_READ_ONLY, &g_view, nk_filter_default);
+    nk_style_pop_font(ctx);
+    /* NK_EDIT_ACTIVE: the preview has focus (was clicked into) this frame,
+     * so g_view.cursor is the line the user picked. Stashed separately so
+     * it survives the click on "+ Add note" that takes focus away. */
+    if (edit_state & NK_EDIT_ACTIVE) g_content_cursor = g_view.cursor;
 
     const Note *found[64];
     size_t found_n = notes_find_for_path(notes, selected_path, found, 64);

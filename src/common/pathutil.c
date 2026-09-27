@@ -72,6 +72,48 @@ bool path_exists(const char *path) {
     return stat(path, &st) == 0;
 }
 
+static bool is_sep(char c) { return c == '/' || c == '\\'; }
+
+char *path_relative(const char *from_dir, const char *to_path) {
+    /* Length of the common prefix, snapped back to a separator boundary. */
+    size_t i = 0, common = 0;
+    while (from_dir[i] && to_path[i] && (from_dir[i] == to_path[i] || (is_sep(from_dir[i]) && is_sep(to_path[i])))) {
+        if (is_sep(from_dir[i])) common = i + 1;
+        i++;
+    }
+    if (!from_dir[i] && (is_sep(to_path[i]) || !to_path[i])) common = to_path[i] ? i + 1 : i;
+    if (common == 0) return xstrdup(to_path);
+
+    /* One "../" per directory left in from_dir past the common prefix. */
+    size_t ups = 0;
+    /* common can sit one past the end of from_dir (when to_path is inside
+     * it and from_dir has no trailing separator): nothing left there. */
+    size_t from_len = strlen(from_dir);
+    const char *rest = common < from_len ? from_dir + common : "";
+    if (*rest) {
+        ups = 1;
+        for (const char *p = rest; *p; p++) {
+            if (is_sep(*p) && p[1]) ups++;
+        }
+    }
+    const char *tail = to_path + common;
+    size_t tail_len = strlen(tail);
+    char *out = (char *)malloc(ups * 3 + tail_len + 1);
+    size_t o = 0;
+    for (size_t k = 0; k < ups; k++) {
+        memcpy(out + o, "../", 3);
+        o += 3;
+    }
+    for (size_t k = 0; k < tail_len; k++) out[o++] = is_sep(tail[k]) ? '/' : tail[k];
+    out[o] = '\0';
+    return out;
+}
+
+bool path_is_dir(const char *path) {
+    struct stat st;
+    return stat(path, &st) == 0 && (st.st_mode & S_IFMT) == S_IFDIR;
+}
+
 const char *path_extension(const char *path) {
     const char *slash = strrchr(path, '/');
     const char *bslash = strrchr(path, '\\');

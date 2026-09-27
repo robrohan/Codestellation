@@ -14,6 +14,11 @@ char *path_dirname(const char *path);
  * doesn't exist. */
 char *path_normalize(const char *path);
 bool  path_exists(const char *path);
+bool  path_is_dir(const char *path);
+/* to_path relative to from_dir (both absolute, e.g. from path_normalize),
+ * using '/' separators: "../x/y.canvas". Falls back to a copy of to_path
+ * when they share no root (different Windows drives). Caller frees. */
+char *path_relative(const char *from_dir, const char *to_path);
 
 /* Returns a pointer *into* path (not malloc'd) at the last "." in the
  * final path component, or "" if there is none. */

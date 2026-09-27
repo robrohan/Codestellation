@@ -25,6 +25,11 @@ void note_compose_open_edit(const Note *note);
 
 bool note_compose_is_open(void);
 
+/* Discards whatever is being composed and hides the pane -- used when the
+ * loaded project changes underneath it, since its target paths and any
+ * note being edited belong to the old project's notes file. */
+void note_compose_close(void);
+
 /* Draws the pane only while open (no-op, *out_bounds left w==0, otherwise).
  * notes/notes_md_path: the same store the Inspector reads -- mutated in
  * place on Save, see notes.h. */
