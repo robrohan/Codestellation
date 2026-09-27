@@ -120,8 +120,15 @@ endif()
 option(CODESTELLATION_DIST "macOS: Developer-ID sign + hardened runtime for distribution" OFF)
 
 if(APPLE AND CMAKE_GENERATOR STREQUAL "Xcode")
+    # App icon, copied into Contents/Resources. Regenerate it with
+    # scripts/make_icon.py (the .icns is committed so builds don't need it).
+    set(CODEMAP_ICON "${CMAKE_SOURCE_DIR}/resources/macos/Codestellation.icns")
+    target_sources(Codestellation PRIVATE "${CODEMAP_ICON}")
+    set_source_files_properties("${CODEMAP_ICON}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+
     set_target_properties(Codestellation PROPERTIES
         OUTPUT_NAME "Codestellation"
+        MACOSX_BUNDLE_ICON_FILE "Codestellation.icns"
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_BUNDLE_NAME "Codestellation"
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.robrohan.codestellation.codemap-view"
@@ -146,6 +153,8 @@ if(APPLE AND CMAKE_GENERATOR STREQUAL "Xcode")
             XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Developer ID Application"
             XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "96MW2MVPWL"
             XCODE_ATTRIBUTE_ENABLE_HARDENED_RUNTIME "YES"
+            # Notarization requires a secure timestamp on the signature.
+            XCODE_ATTRIBUTE_OTHER_CODE_SIGN_FLAGS "--timestamp"
         )
     else()
         # Local dev: sign to run locally, no hardened runtime.
