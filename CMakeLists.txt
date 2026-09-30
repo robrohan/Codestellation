@@ -154,6 +154,118 @@ if(EXISTS ${ts_vbnet_SOURCE_DIR}/src/scanner.c)
 endif()
 target_include_directories(tree_sitter_vbnet PUBLIC ${ts_vbnet_SOURCE_DIR}/src)
 
+# --- tree-sitter-javascript grammar (JavaScript/JSX adapter) ----------
+# One grammar covers plain JS and JSX. Has an external scanner.
+FetchContent_Declare(ts_javascript
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-javascript
+    GIT_TAG v0.25.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_Populate(ts_javascript)
+add_library(tree_sitter_javascript STATIC
+    ${ts_javascript_SOURCE_DIR}/src/parser.c
+    ${ts_javascript_SOURCE_DIR}/src/scanner.c)
+target_include_directories(tree_sitter_javascript PUBLIC ${ts_javascript_SOURCE_DIR}/src)
+
+# --- tree-sitter-typescript grammars (TypeScript + TSX adapters) --------
+# The repo holds two grammars side by side: typescript/ (.ts) and tsx/
+# (.tsx, TypeScript plus JSX). Both scanners include ../../common/scanner.h,
+# which resolves in place, so they're compiled from where they sit.
+FetchContent_Declare(ts_typescript
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-typescript
+    GIT_TAG v0.23.2
+    GIT_SHALLOW TRUE
+)
+FetchContent_Populate(ts_typescript)
+add_library(tree_sitter_typescript STATIC
+    ${ts_typescript_SOURCE_DIR}/typescript/src/parser.c
+    ${ts_typescript_SOURCE_DIR}/typescript/src/scanner.c)
+target_include_directories(tree_sitter_typescript PUBLIC ${ts_typescript_SOURCE_DIR}/typescript/src)
+add_library(tree_sitter_tsx STATIC
+    ${ts_typescript_SOURCE_DIR}/tsx/src/parser.c
+    ${ts_typescript_SOURCE_DIR}/tsx/src/scanner.c)
+target_include_directories(tree_sitter_tsx PUBLIC ${ts_typescript_SOURCE_DIR}/tsx/src)
+
+# --- tree-sitter-json grammar (JSON adapter) ---------------------------
+# Generated parser.c, no external scanner.
+FetchContent_Declare(ts_json
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-json
+    GIT_TAG v0.24.8
+    GIT_SHALLOW TRUE
+)
+FetchContent_Populate(ts_json)
+add_library(tree_sitter_json STATIC ${ts_json_SOURCE_DIR}/src/parser.c)
+target_include_directories(tree_sitter_json PUBLIC ${ts_json_SOURCE_DIR}/src)
+
+# --- tree-sitter-bash grammar (shell script adapter) -------------------
+FetchContent_Declare(ts_bash
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-bash
+    GIT_TAG v0.25.1
+    GIT_SHALLOW TRUE
+)
+FetchContent_Populate(ts_bash)
+add_library(tree_sitter_bash STATIC
+    ${ts_bash_SOURCE_DIR}/src/parser.c
+    ${ts_bash_SOURCE_DIR}/src/scanner.c)
+target_include_directories(tree_sitter_bash PUBLIC ${ts_bash_SOURCE_DIR}/src)
+
+# --- tree-sitter-proto grammar (Protocol Buffers adapter) --------------
+# Not in the tree-sitter org; coder3101's is the maintained one. Generated
+# parser.c, no external scanner.
+FetchContent_Declare(ts_proto
+    GIT_REPOSITORY https://github.com/coder3101/tree-sitter-proto
+    GIT_TAG 0.6.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_Populate(ts_proto)
+add_library(tree_sitter_proto STATIC ${ts_proto_SOURCE_DIR}/src/parser.c)
+target_include_directories(tree_sitter_proto PUBLIC ${ts_proto_SOURCE_DIR}/src)
+
+# --- tree-sitter-sql grammar (SQL adapter) ------------------------------
+# DerekStride's grammar (the maintained general-purpose SQL one) doesn't
+# commit its generated parser.c to main or its tags -- it's published to
+# the gh-pages branch by CI. A moving branch isn't reproducible, so this
+# pins one gh-pages commit (deploy of main@97614d0, 2026-09-19) and fetches
+# it as a tarball with a checksum. To update: pick a newer gh-pages commit
+# and replace both the SHA in the URL and the hash. Large parser.c (~40MB),
+# like C#'s. Has an external scanner.
+FetchContent_Declare(ts_sql
+    URL https://github.com/DerekStride/tree-sitter-sql/archive/39fdb006403747241244326e8af3b3e96b85381c.tar.gz
+    URL_HASH SHA256=3926262684353dff4979c451c9db80e81918cab94cbd3842117e3ea4fbaa4941
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_Populate(ts_sql)
+add_library(tree_sitter_sql STATIC
+    ${ts_sql_SOURCE_DIR}/src/parser.c
+    ${ts_sql_SOURCE_DIR}/src/scanner.c)
+target_include_directories(tree_sitter_sql PUBLIC ${ts_sql_SOURCE_DIR}/src)
+
+# --- tree-sitter-powershell grammar (PowerShell adapter) ----------------
+# airbus-cert's is the maintained PowerShell grammar. Generated parser.c +
+# an external scanner.
+FetchContent_Declare(ts_powershell
+    GIT_REPOSITORY https://github.com/airbus-cert/tree-sitter-powershell
+    GIT_TAG v0.26.5
+    GIT_SHALLOW TRUE
+)
+FetchContent_Populate(ts_powershell)
+add_library(tree_sitter_powershell STATIC
+    ${ts_powershell_SOURCE_DIR}/src/parser.c
+    ${ts_powershell_SOURCE_DIR}/src/scanner.c)
+target_include_directories(tree_sitter_powershell PUBLIC ${ts_powershell_SOURCE_DIR}/src)
+
+# --- tree-sitter-batch grammar (Windows batch / cmd adapter) -------------
+# wharflab's grammar: handles %~dp0, call "...", ^ continuations, etc.
+# Generated parser.c, no external scanner.
+FetchContent_Declare(ts_batch
+    GIT_REPOSITORY https://github.com/wharflab/tree-sitter-batch
+    GIT_TAG v0.11.1
+    GIT_SHALLOW TRUE
+)
+FetchContent_Populate(ts_batch)
+add_library(tree_sitter_batch STATIC ${ts_batch_SOURCE_DIR}/src/parser.c)
+target_include_directories(tree_sitter_batch PUBLIC ${ts_batch_SOURCE_DIR}/src)
+
 # --- GLFW (window/input/GL context, cross-platform) ----------------------
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)

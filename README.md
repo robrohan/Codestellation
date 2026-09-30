@@ -1,33 +1,70 @@
 # Codestellation
 
-![screen shot](./doc/screen.png)
+![canvas_view](./doc/canvas_view.png)
 
-Walks a codebase, extracts cross-file dependencies with tree-sitter, and
-renders them as an interactive 3D graph in native OpenGL + Nuklear.
-Built for digging through unfamiliar/legacy multi-language codebases.
+![code_view](./doc/code_view.png)
 
-One app, `codemap-view`: Properties > Open picks a directory, walks it
-(recursively, mixed languages in one tree are fine), parses each file with
-the matching language adapter, builds a dependency graph in the background,
-and loads it into the 3D view -- no restart. The graph is cached as
-`graph.json` in a per-project folder under
-`~/Library/Application Support/Codestellation/`.
 
-Currently supported languages: **C** (`.c`/`.h`, `#include`-based),
-**C#** (`.cs`, namespace/type declarations + `using`-qualified
-references), **Python** (`.py`/`.pyi`, `import` / `from ... import`,
-including relative imports), **Go** (`.go`, `import` paths resolved to
-packages by directory), **Lisp** (`.lisp`/`.lsp`/`.cl` -- a Common Lisp
-stand-in; see the header comment in `src/lang/lisp/lisp_adapter.c`
-before trusting it on a real codebase, the actual dialect wasn't
-confirmed when this was written).
+## What it Does
 
-Python and Go have no in-source module identity -- `pkg.sub.mod` /
-`example.com/m/pkg` come from where a file sits relative to a source
-root (or `go.mod`) the adapter never sees -- so their dependency
-resolution is a documented best-guess (path-suffix matching, plus
-on-disk lookup for Python relative imports). See the header comments in
-`src/lang/python/python_adapter.c` and `src/lang/go/go_adapter.c`.
+The canvas view is for multi-level system diagrams. Draw boxes for servers,
+services, databases, regions, or whatever your system is made of, connect
+them with labelled lines, and nest them as deep as you like: shift+click a
+box to go "into it" and diagram what's inside the box.
+
+You can use a structure like the [C4 model](https://c4model.com) (context, containers, components, code) or make up your own levels. At the node of any diagram, a box
+can point at folders of source code, which opens them in the 3D code view so you can comment
+and see the source structure. Every box holds markdown notes, and the whole map can be searched or exported as a single document.
+
+The codestellation view walks a codebase, extracts cross-file dependencies with
+tree-sitter, and renders them as an interactive 3D graph in native OpenGL + Nuklear.
+
+Codestellation is built for digging through unfamiliar, legacy, or "vibe coded" multi-language codebases, and it's export is meant to make a manual, or to feed back into an LLM.
+
+## Supported languages
+
+| Language | Extensions | What links files |
+|---|---|---|
+| C | `.c` `.h` | `#include` |
+| C# | `.cs` | namespace/type declarations, `using`-qualified type references |
+| Python | `.py` `.pyi` | `import`, `from ... import`, relative imports |
+| Go | `.go` | `import` paths, resolved to packages by directory |
+| PHP | `.php` | `require`/`include`; `namespace`, `use`, `extends`, `implements` |
+| VB.NET | `.vb` | `Imports` and namespaces (see note) |
+| Common Lisp | `.lisp` `.lsp` `.cl` | `in-package`, `require`, `defpackage :use` (see note) |
+| JavaScript | `.js` `.mjs` `.cjs` `.jsx` | `import`/`export ... from`, `require()`, dynamic `import()` |
+| TypeScript | `.ts` `.mts` `.cts` `.tsx` | as JavaScript, plus tsconfig/jsconfig `baseUrl`, `paths` and `extends` |
+| JSON | `.json` | `"$ref"` (JSON Schema / OpenAPI), relative `"extends"` (tsconfig, eslint) |
+| SQL | `.sql` | objects made by `CREATE TABLE/VIEW/FUNCTION/...`, used by `FROM`/`JOIN`, `INSERT`/`UPDATE`/`DELETE`, `ALTER`, foreign keys, function calls |
+| Protocol Buffers | `.proto` | `import`, `import public` |
+| Shell | `.sh` `.bash` | `source` / `.`, `./script.sh`, `bash script.sh`, `$(dirname "$0")/...` |
+| PowerShell | `.ps1` `.psm1` `.psd1` | dot-sourcing, `&` and direct runs, `Import-Module` (path, module folder or name), `using module`, `.psd1` manifest entries |
+| Batch | `.bat` `.cmd` | `call` (including `%~dp0`), direct runs, `start`, scripts passed to `powershell -File` / `cmd /c` |
+
+Notes:
+
+- **JavaScript / TypeScript:** relative imports resolve like Node, tsc and
+  bundlers (extensions, `index` files, `./x.js` meaning `x.ts`). Bare imports
+  go through the nearest `tsconfig.json`/`jsconfig.json` before counting as
+  packages. TypeScript files can import JSON files.
+- **SQL** links by object name, so migrations, views and queries point at the
+  file that created what they use.
+- **PowerShell and batch** scripts that call each other are linked.
+  `$PSScriptRoot` and `%~dp0` mean "this script's folder".
+- **Python, Go and Protocol Buffers** have no in-source module identity, so
+  they match imports by path suffix -- a documented best guess. See the
+  header comments in `src/lang/python/python_adapter.c` and
+  `src/lang/go/go_adapter.c`.
+- **VB.NET:** the pinned grammar misparses `Inherits` / `Implements` lines,
+  so base-class and interface links don't appear; `Imports` do. See
+  `src/lang/vbnet/vbnet_adapter.c`.
+- **Common Lisp** is a stand-in for an unconfirmed dialect; read the header of
+  `src/lang/lisp/lisp_adapter.c` before trusting it on a real codebase.
+- Each adapter's header comment documents exactly what it recognises, and
+  `test_data/` has a small sample project for every language.
+
+The walker skips `node_modules`, `dist`, `.next`, `coverage`, `build`,
+`vendor` and similar output directories, plus minified `*.min.js` files.
 
 ## Build
 

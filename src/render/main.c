@@ -233,6 +233,29 @@ static void loaded_graph_show(const LoadedGraph *lg, GLScene *scene, Camera *cam
     if (radius > 0.1f) camera->distance = (radius / sinf(camera->fovy * 0.5f)) * 1.2f;
 }
 
+/* Modifier keys held at the most recent mouse-button press, straight from
+ * the OS click event. Used instead of polling glfwGetKey for Ctrl/Cmd:
+ * GLFW's remembered key state can stick "down" on macOS when a key-up is
+ * missed (Cmd used in a shortcut the system or another app takes), which
+ * turned every right-click into a group toggle until Ctrl/Cmd was pressed
+ * again. The flags on the click itself can't go stale. */
+static int g_press_mods = 0;
+
+static void mouse_button_callback(GLFWwindow *w, int button, int action, int mods) {
+    if (action == GLFW_PRESS) g_press_mods = mods;
+    nk_glfw3_mouse_button_callback(w, button, action, mods); /* Nuklear still needs every click */
+}
+
+/* Cmd/Ctrl+F, taken from the key event's own modifiers for the same reason. */
+static bool g_find_pressed = false;
+
+static void key_callback(GLFWwindow *w, int key, int scancode, int action, int mods) {
+    if (key == GLFW_KEY_F && action == GLFW_PRESS && (mods & (GLFW_MOD_CONTROL | GLFW_MOD_SUPER))) {
+        g_find_pressed = true;
+    }
+    nk_glfw3_key_callback(w, key, scancode, action, mods);
+}
+
 static bool ends_with(const char *s, const char *suffix) {
     size_t n = strlen(s), m = strlen(suffix);
     return n >= m && strcmp(s + n - m, suffix) == 0;
@@ -323,6 +346,8 @@ int main(int argc, char **argv) {
 
     struct nk_glfw glfw_nk = { 0 };
     struct nk_context *ctx = nk_glfw3_init(&glfw_nk, win, NK_GLFW3_INSTALL_CALLBACKS);
+    glfwSetMouseButtonCallback(win, mouse_button_callback); /* these wrap Nuklear's */
+    glfwSetKeyCallback(win, key_callback);
     theme_apply_panels(ctx);
     {
         /* Bake at the framebuffer's real resolution (see fonts.h). Fixed
@@ -413,7 +438,7 @@ int main(int argc, char **argv) {
         }
     }
     CanvasPanels canvas_panels = { { 0, 0, 0, 0 }, { 0, 0, 0, 0 }, { 0, 0, 0, 0 } };
-    bool esc_was_down = false, delete_was_down = false, find_was_down = false;
+    bool esc_was_down = false, delete_was_down = false;
 
     glEnable(GL_PROGRAM_POINT_SIZE);
     glEnable(GL_DEPTH_TEST);
@@ -437,14 +462,9 @@ int main(int argc, char **argv) {
             if (canvas_view_is_open()) canvas_view_escape();
             else glfwSetWindowShouldClose(win, GLFW_TRUE);
         }
-        /* Cmd+F (macOS) / Ctrl+F: project-wide canvas search. */
-        bool find_down = glfwGetKey(win, GLFW_KEY_F) == GLFW_PRESS &&
-                         (glfwGetKey(win, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
-                          glfwGetKey(win, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS ||
-                          glfwGetKey(win, GLFW_KEY_LEFT_SUPER) == GLFW_PRESS ||
-                          glfwGetKey(win, GLFW_KEY_RIGHT_SUPER) == GLFW_PRESS);
-        if (find_down && !find_was_down && canvas_mode) canvas_view_open_search();
-        find_was_down = find_down;
+        /* Cmd+F (macOS) / Ctrl+F: project-wide canvas search (see key_callback). */
+        if (g_find_pressed && canvas_mode) canvas_view_open_search();
+        g_find_pressed = false;
 
         /* Swap in a finished Open build at the top of the frame, before
          * anything below reads node ids or positions, so no frame ever
@@ -581,11 +601,7 @@ int main(int argc, char **argv) {
             } else if (pan_button_down && !block_3d) {
                 interact = INTERACT_PAN;
                 pan_via_right = (right_state == GLFW_PRESS);
-                cluster_modifier_at_press =
-                    glfwGetKey(win, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
-                    glfwGetKey(win, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS ||
-                    glfwGetKey(win, GLFW_KEY_LEFT_SUPER) == GLFW_PRESS ||
-                    glfwGetKey(win, GLFW_KEY_RIGHT_SUPER) == GLFW_PRESS;
+                cluster_modifier_at_press = (g_press_mods & (GLFW_MOD_CONTROL | GLFW_MOD_SUPER)) != 0;
                 press_x = mx;
                 press_y = my;
                 moved_since_press = false;
@@ -665,8 +681,7 @@ int main(int argc, char **argv) {
                 .left = left_state == GLFW_PRESS,
                 .right = right_state == GLFW_PRESS,
                 .middle = middle_state == GLFW_PRESS,
-                .shift = glfwGetKey(win, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
-                         glfwGetKey(win, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS,
+                .shift = (g_press_mods & GLFW_MOD_SHIFT) != 0, /* held at the click, see g_press_mods */
                 .scroll = scroll_y,
                 .time = glfwGetTime(),
                 .over_panel = over_panel,

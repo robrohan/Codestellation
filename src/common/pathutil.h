@@ -19,6 +19,13 @@ bool  path_is_dir(const char *path);
  * using '/' separators: "../x/y.canvas". Falls back to a copy of to_path
  * when they share no root (different Windows drives). Caller frees. */
 char *path_relative(const char *from_dir, const char *to_path);
+/* Collapses "." and ".." segments and doubled separators without touching
+ * the disk ("/a/b/../c/./d" -> "/a/c/d"), keeping a leading "/" or drive
+ * prefix and the style of the path's first separator (a Windows base dir
+ * joined with a "./x" specifier stays all-backslash). For resolving
+ * relative imports against already-normalized file paths cheaply -- no
+ * realpath() per candidate. Caller frees. */
+char *path_clean(const char *path);
 
 /* Returns a pointer *into* path (not malloc'd) at the last "." in the
  * final path component, or "" if there is none. */

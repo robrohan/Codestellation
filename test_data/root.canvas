@@ -1,0 +1,28 @@
+{
+	"nodes":[
+		{"id":"group-langs","type":"group","label":"One box per language folder","x":-40,"y":-60,"width":1320,"height":820},
+		{"id":"lang-c","type":"text","text":"## C\n`#include` between .c/.h files\n\nShift+click: [[c]]","x":0,"y":0,"width":280,"height":150,"color":"1"},
+		{"id":"lang-csharp","type":"text","text":"## C#\nnamespaces, `using`, type references\n\nShift+click: [[csharp]]","x":320,"y":0,"width":280,"height":150,"color":"6"},
+		{"id":"lang-python","type":"text","text":"## Python\n`import`, `from … import`, relative imports, a `.pyi` stub\n\nShift+click: [[python]]","x":640,"y":0,"width":280,"height":150,"color":"3"},
+		{"id":"lang-go","type":"text","text":"## Go\n`import` paths resolved via go.mod\n\nShift+click: [[go]]","x":960,"y":0,"width":280,"height":150,"color":"5"},
+		{"id":"lang-lisp","type":"text","text":"## Common Lisp\n`require`, `defpackage :use` (.lisp/.lsp/.cl)\n\nShift+click: [[lisp]]","x":0,"y":190,"width":280,"height":150,"color":"6"},
+		{"id":"lang-php","type":"text","text":"## PHP\nnamespaces, `use`, `require`\n\nShift+click: [[php]]","x":320,"y":190,"width":280,"height":150,"color":"6"},
+		{"id":"lang-vbnet","type":"text","text":"## VB.NET\n`Imports`, `Inherits`, `Implements` (see README: 0 edges today)\n\nShift+click: [[vbnet]]","x":640,"y":190,"width":280,"height":150,"color":"6"},
+		{"id":"lang-javascript","type":"text","text":"## JavaScript / JSX\n`require`, `import()`, .mjs/.cjs/.jsx\n\nShift+click: [[javascript]]","x":960,"y":190,"width":280,"height":150,"color":"3"},
+		{"id":"lang-typescript","type":"text","text":"## TypeScript / TSX\nrelative, `.js`→`.ts`, tsconfig `baseUrl`/`paths`/`extends`, .mts/.cts, JSON import\n\nShift+click: [[typescript]]","x":0,"y":380,"width":280,"height":150,"color":"5"},
+		{"id":"lang-json","type":"text","text":"## JSON\n`$ref` between schemas\n\nShift+click: [[json]]","x":320,"y":380,"width":280,"height":150,"color":"4"},
+		{"id":"lang-sql","type":"text","text":"## SQL\ntables, views, FKs, ALTER, function calls across migrations\n\nShift+click: [[sql]]","x":640,"y":380,"width":280,"height":150,"color":"2"},
+		{"id":"lang-proto","type":"text","text":"## Protocol Buffers\n`import` / `import public`\n\nShift+click: [[proto]]","x":960,"y":380,"width":280,"height":150,"color":"2"},
+		{"id":"lang-bash","type":"text","text":"## Shell\n`source`, `.`, `./x.sh`, `bash x.sh`, `$(dirname \"$0\")`\n\nShift+click: [[bash]]","x":0,"y":570,"width":280,"height":150,"color":"4"},
+		{"id":"intro","type":"text","text":"# Codestellation test data\nEvery supported file type, as small projects.\n\n- **Shift+click** a language box to open its code in 3D; Esc comes back\n- Shift+click **Canvas features** to go into a nested canvas\n- **Cmd+F** searches every canvas\n\nExpected results: `test_data/README.md`","x":-40,"y":-380,"width":460,"height":260},
+		{"id":"nested","type":"text","text":"## Canvas features\nA nested canvas with a weak link back to the TypeScript box.\n\n[[canvas-features.canvas]]","x":480,"y":-380,"width":320,"height":170,"color":"4"},
+		{"id":"lang-powershell","type":"text","text":"## PowerShell\ndot-sourcing, `Import-Module`, `using module`, `.psd1` manifests, runs a `.bat`\n\nShift+click: [[powershell]]","x":320,"y":570,"width":280,"height":150,"color":"5"},
+		{"id":"lang-batch","type":"text","text":"## Batch / CMD\n`call`, `%~dp0`, direct runs, `start`, `powershell -File` a `.ps1`\n\nShift+click: [[batch]]","x":640,"y":570,"width":280,"height":150,"color":"1"}
+	],
+	"edges":[
+		{"id":"e1","fromNode":"lang-typescript","toNode":"lang-json","label":"imports config.json"},
+		{"id":"e2","fromNode":"lang-javascript","toNode":"lang-typescript","label":"same adapter"},
+		{"id":"e3","fromNode":"intro","toNode":"nested"},
+		{"id":"e4","fromNode":"lang-batch","toNode":"lang-powershell","label":"calls each other"}
+	]
+}

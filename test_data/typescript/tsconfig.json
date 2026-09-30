@@ -1,0 +1,7 @@
+{
+  // baseUrl and paths are inherited from the base config
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+  },
+}

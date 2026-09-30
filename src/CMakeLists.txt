@@ -46,6 +46,14 @@ add_executable(Codestellation
     lang/go/go_adapter.c
     lang/php/php_adapter.c
     lang/vbnet/vbnet_adapter.c
+    lang/js/js_adapter.c
+    lang/json/json_adapter.c
+    lang/bash/bash_adapter.c
+    lang/proto/proto_adapter.c
+    lang/sql/sql_adapter.c
+    lang/winscript.c
+    lang/powershell/powershell_adapter.c
+    lang/batch/batch_adapter.c
     notes/filehash.c
     notes/overlay.c
     notes/notes.c
@@ -79,7 +87,9 @@ target_include_directories(Codestellation PRIVATE
 find_package(Threads REQUIRED)
 target_link_libraries(Codestellation PRIVATE glfw OpenGL::GL Threads::Threads
     tree-sitter tree_sitter_c tree_sitter_csharp tree_sitter_lisp tree_sitter_python
-    tree_sitter_go tree_sitter_php tree_sitter_vbnet)
+    tree_sitter_go tree_sitter_php tree_sitter_vbnet
+    tree_sitter_javascript tree_sitter_typescript tree_sitter_tsx tree_sitter_json
+    tree_sitter_bash tree_sitter_proto tree_sitter_sql tree_sitter_powershell tree_sitter_batch)
 
 # The CMake *target* is named Codestellation (so the Xcode generator's
 # auto-created scheme/product picker shows that instead of a stale

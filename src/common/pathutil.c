@@ -109,6 +109,61 @@ char *path_relative(const char *from_dir, const char *to_path) {
     return out;
 }
 
+char *path_clean(const char *path) {
+    size_t len = strlen(path);
+    /* Output separator: whichever style the path starts with -- the base
+     * directory's. A Windows dir joined with a "./x" or "lib/x" specifier
+     * ("C:\\proj\\src/./x.ts") must come out all-backslash to match the
+     * key the file was declared under. */
+    const char *first = strpbrk(path, "/\\");
+    char sep = first ? *first : '/';
+
+    /* Root prefix kept verbatim: "/" or a Windows drive "C:\\" / "C:/". */
+    size_t root = 0;
+    if (len >= 2 && path[1] == ':') root = 2;
+    if (root < len && is_sep(path[root])) root++;
+
+    /* Segment start/length pairs, with ".." popping the previous one. */
+    size_t cap = len / 2 + 2, count = 0;
+    size_t *starts = (size_t *)malloc(cap * sizeof(size_t));
+    size_t *lens = (size_t *)malloc(cap * sizeof(size_t));
+    size_t i = root;
+    while (i < len) {
+        while (i < len && is_sep(path[i])) i++;
+        size_t s = i;
+        while (i < len && !is_sep(path[i])) i++;
+        size_t n = i - s;
+        if (n == 0 || (n == 1 && path[s] == '.')) continue;
+        if (n == 2 && path[s] == '.' && path[s + 1] == '.') {
+            /* Pop, unless there's nothing to pop (or only ".." for a
+             * relative path, which has to stay). */
+            if (count > 0 && !(lens[count - 1] == 2 && path[starts[count - 1]] == '.' &&
+                               path[starts[count - 1] + 1] == '.')) {
+                count--;
+                continue;
+            }
+            if (root > 0) continue; /* can't climb above the root */
+        }
+        starts[count] = s;
+        lens[count] = n;
+        count++;
+    }
+
+    char *out = (char *)malloc(len + 2);
+    size_t o = 0;
+    for (size_t k = 0; k < root; k++) out[o++] = is_sep(path[k]) ? sep : path[k];
+    for (size_t k = 0; k < count; k++) {
+        if (k > 0) out[o++] = sep;
+        memcpy(out + o, path + starts[k], lens[k]);
+        o += lens[k];
+    }
+    if (o == 0) out[o++] = '.';
+    out[o] = '\0';
+    free(starts);
+    free(lens);
+    return out;
+}
+
 bool path_is_dir(const char *path) {
     struct stat st;
     return stat(path, &st) == 0 && (st.st_mode & S_IFMT) == S_IFDIR;
@@ -126,7 +181,9 @@ const char *path_extension(const char *path) {
 
 static const char *SKIP_DIRS[] = { ".git", "bin", "obj", "build", "node_modules",
                                    "__pycache__", ".venv", "venv", ".tox", ".mypy_cache",
-                                   "vendor", NULL };
+                                   "vendor",
+                                   /* JS/TS build output and test artifacts */
+                                   "dist", ".next", "coverage", NULL };
 
 static bool should_skip_dir(const char *name) {
     for (int i = 0; SKIP_DIRS[i]; i++) {
