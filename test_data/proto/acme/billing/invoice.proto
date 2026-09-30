@@ -1,0 +1,5 @@
+syntax = "proto3";
+package acme.billing;
+import "acme/common/money.proto";               // -> money.proto
+import "google/protobuf/timestamp.proto";       // well-known type: unresolved
+message Invoice { acme.common.Money total = 1; google.protobuf.Timestamp at = 2; }

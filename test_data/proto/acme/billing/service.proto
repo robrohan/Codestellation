@@ -1,0 +1,4 @@
+syntax = "proto3";
+package acme.billing;
+import public "acme/billing/invoice.proto";     // -> invoice.proto
+service Billing { rpc Get(Invoice) returns (Invoice); }

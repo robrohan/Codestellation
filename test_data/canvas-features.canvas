@@ -1,0 +1,13 @@
+{
+	"nodes":[
+		{"id":"f-note","type":"text","text":"# Canvas features\n**Bold**, *italic*, `code`, lists:\n\n- a weak link (dashed box) on the right\n- shift+click it to jump back to the original\n- Esc or the breadcrumb goes up","x":0,"y":0,"width":360,"height":230},
+		{"id":"f-weak","type":"file","file":"root.canvas","subpath":"#lang-typescript","x":440,"y":0,"width":300,"height":190},
+		{"id":"f-group","type":"group","label":"A group","x":-40,"y":280,"width":820,"height":220},
+		{"id":"f-a","type":"text","text":"## Service A\ncalls B","x":0,"y":330,"width":240,"height":120,"color":"5"},
+		{"id":"f-b","type":"text","text":"## Service B\nowns the data","x":480,"y":330,"width":240,"height":120,"color":"4"}
+	],
+	"edges":[
+		{"id":"fe1","fromNode":"f-a","toNode":"f-b","label":"HTTPS 443"},
+		{"id":"fe2","fromNode":"f-note","toNode":"f-weak","label":"references"}
+	]
+}

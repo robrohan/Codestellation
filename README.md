@@ -17,10 +17,37 @@ Currently supported languages: **C** (`.c`/`.h`, `#include`-based),
 **C#** (`.cs`, namespace/type declarations + `using`-qualified
 references), **Python** (`.py`/`.pyi`, `import` / `from ... import`,
 including relative imports), **Go** (`.go`, `import` paths resolved to
-packages by directory), **Lisp** (`.lisp`/`.lsp`/`.cl` -- a Common Lisp
-stand-in; see the header comment in `src/lang/lisp/lisp_adapter.c`
-before trusting it on a real codebase, the actual dialect wasn't
-confirmed when this was written).
+packages by directory), **PHP**, **VB.NET**, **Lisp**
+(`.lisp`/`.lsp`/`.cl` -- a Common Lisp stand-in; see the header comment in
+`src/lang/lisp/lisp_adapter.c` before trusting it on a real codebase, the
+actual dialect wasn't confirmed when this was written), and:
+
+- **JavaScript** (`.js`/`.mjs`/`.cjs`/`.jsx`), **TypeScript**
+  (`.ts`/`.mts`/`.cts`) and **TSX** (`.tsx`, React): `import`/`export ...
+  from`, `require()`, dynamic `import()`. Relative imports resolve like
+  Node/tsc/bundlers (extensions, `index` files, `./x.js` meaning `x.ts`);
+  bare imports go through the nearest `tsconfig.json`/`jsconfig.json`
+  (`baseUrl`, `paths` aliases, `extends`) before counting as packages.
+- **JSON** (`.json`): files appear as nodes; `"$ref"` (JSON Schema /
+  OpenAPI) and relative `"extends"` (tsconfig, eslint) link files.
+  `package-lock.json` is skipped.
+- **SQL** (`.sql`): `CREATE TABLE/VIEW/FUNCTION/...` declare objects;
+  `FROM`/`JOIN`, `INSERT`/`UPDATE`/`DELETE`, `ALTER`, foreign keys and
+  function calls reference them -- so migrations, views and queries link
+  to the files that create what they use.
+- **Protocol Buffers** (`.proto`): `import` paths, matched by path suffix
+  since protoc's include roots aren't known.
+- **Shell** (`.sh`/`.bash`): `source`/`.`, `./script.sh`, `bash script.sh`,
+  including the `"$(dirname "$0")/lib.sh"` idiom.
+- **PowerShell** (`.ps1`/`.psm1`/`.psd1`): dot-sourcing, `&` and direct
+  runs, `Import-Module` (by path, module folder or name), `using module`,
+  and `.psd1` manifest entries; `$PSScriptRoot` means the script's folder.
+- **Batch** (`.bat`/`.cmd`): `call` (including `%~dp0`), running scripts
+  directly, `start`, and scripts handed to `powershell -File` / `cmd /c`.
+  PowerShell and batch scripts that call each other are linked.
+
+The walker skips `node_modules`, `dist`, `.next`, `coverage`, `build`,
+`vendor` and similar output directories, plus minified `*.min.js` files.
 
 Python and Go have no in-source module identity -- `pkg.sub.mod` /
 `example.com/m/pkg` come from where a file sits relative to a source
@@ -28,6 +55,7 @@ root (or `go.mod`) the adapter never sees -- so their dependency
 resolution is a documented best-guess (path-suffix matching, plus
 on-disk lookup for Python relative imports). See the header comments in
 `src/lang/python/python_adapter.c` and `src/lang/go/go_adapter.c`.
+Each adapter's header comment documents exactly what it recognises.
 
 ## Build
 

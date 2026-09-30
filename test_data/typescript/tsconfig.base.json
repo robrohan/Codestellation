@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "module": "esnext",
+    "baseUrl": "./src",
+    "paths": {
+      "@lib/*": ["lib/*"]
+    }
+  }
+}

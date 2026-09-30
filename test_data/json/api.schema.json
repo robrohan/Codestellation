@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "user":   { "$ref": "./user.schema.json#/definitions/User" },
+    "parent": { "$ref": "#/properties/user" },
+    "remote": { "$ref": "https://example.com/schemas/geo.json" }
+  }
+}
