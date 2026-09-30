@@ -24,7 +24,7 @@ outside the sample (packages, standard library), which are expected.
 | `go` | 4 | 4 | 2 | `import` paths resolved via `go.mod` |
 | `lisp` | 5 | 4 | 0 | `in-package` / `require` / `defpackage :use`; `.lisp`, `.lsp`, `.cl` |
 | `php` | 6 | 7 | 0 | namespaces, `use`, `require` |
-| `vbnet` | 5 | **0** | 1 | `Imports`, `Inherits`, `Implements` -- **see below** |
+| `vbnet` | 5 | **0** | 1 | `Imports`, `Inherits`, `Implements` -- **see below** (grammar limitation) |
 | `javascript` | 6 | 5 | 1 | `require`, `import()`, `.js`/`.mjs`/`.cjs`/`.jsx` (`pg` is a package) |
 | `typescript` | 12 | 12 | 2 | see below |
 | `json` | 2 | 1 | 0 | `$ref` to another schema; `#/…` and URL refs are ignored |
@@ -72,12 +72,13 @@ outside the sample (packages, standard library), which are expected.
 - batch -> PowerShell: `powershell -File "%~dp0tools\package.ps1"`
 - `call :cleanup` is a label in the same file, so it is **not** an edge
 
-### VB.NET: known issue
+### VB.NET: known limitation
 
-The VB.NET sample expects three edges (`Program` inherits `ShapeRunnerBase`;
-`Square` and `Circle` implement `IShape`) but the adapter currently finds
-**none**. That's a bug in the existing VB.NET adapter, not in the sample
-(the committed code gives the same 0), and still to be fixed.
+The VB.NET sample has three base-type links (`Program` inherits
+`ShapeRunnerBase`; `Square` and `Circle` implement `IShape`) but none appear:
+the pinned VB.NET grammar misparses `Inherits` / `Implements` lines as a
+field plus a parse error, so there's nothing to extract. This is documented in
+`src/lang/vbnet/vbnet_adapter.c` and would clear up with a better grammar.
 
 ## Canvas project
 
