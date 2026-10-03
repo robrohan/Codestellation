@@ -1,0 +1,27 @@
+{
+	"nodes":[
+		{"id":"grp-adapters","type":"group","label":"Per-language adapters (each implements LanguageAdapter)","x":-40,"y":80,"width":1560,"height":1200},
+		{"id":"title","type":"text","text":"# Language adapters, components\nEach folder under `src/lang/` is one adapter. All are registered in `registry.c` and share the interface in `adapter.h`.","x":-400,"y":-440,"width":300,"height":160},
+		{"id":"wl-pipeline","type":"file","file":"app.canvas","subpath":"#cmp-pipeline","x":-339,"y":-140,"width":300,"height":160},
+		{"id":"wl-treesitter","type":"file","file":"root.canvas","subpath":"#ext-treesitter","x":871,"y":-139,"width":300,"height":160},
+		{"id":"cmp-registry","type":"text","text":"## Adapter interface & registry\n*Component: C*\n`adapter.h` defines `LanguageAdapter`; `registry.c` registers every adapter and picks one by file extension. `winscript.c` holds PowerShell/batch shared keys. The link opens all of `src/lang`.\nKey: `adapter.h`, `registry.c`, `winscript.c`\nCode: [[../src/lang]]","x":380,"y":-160,"width":300,"height":200,"color":"4"},
+		{"id":"cmp-c","type":"text","text":"## C\n*Component: C, tree-sitter*\n`.c` `.h`: `#include` paths. Simplest adapter: no symbol table, flat query.\nCode: [[../src/lang/c]]","x":0,"y":160,"width":300,"height":200,"color":"4"},
+		{"id":"cmp-csharp","type":"text","text":"## C#\n*Component: C, tree-sitter*\n`.cs`: Namespace/type declarations and `using`-qualified references, scoped by walking the tree. Queries in `queries/*.scm`.\nCode: [[../src/lang/csharp]]","x":380,"y":160,"width":300,"height":200,"color":"4"},
+		{"id":"cmp-python","type":"text","text":"## Python\n*Component: C, tree-sitter*\n`.py` `.pyi`: `import` / `from ... import`, incl. relative. Module identity is path-derived, matched by suffix (best guess).\nCode: [[../src/lang/python]]","x":760,"y":160,"width":300,"height":200,"color":"4"},
+		{"id":"cmp-go","type":"text","text":"## Go\n*Component: C, tree-sitter*\n`.go`: `import` paths resolved to a package directory by suffix match.\nCode: [[../src/lang/go]]","x":1140,"y":160,"width":300,"height":200,"color":"4"},
+		{"id":"cmp-php","type":"text","text":"## PHP\n*Component: C, tree-sitter*\n`.php`: `require`/`include`, `namespace`, `use`, `extends`, `implements`.\nCode: [[../src/lang/php]]","x":0,"y":440,"width":300,"height":200,"color":"4"},
+		{"id":"cmp-vbnet","type":"text","text":"## VB.NET\n*Component: C, tree-sitter*\n`.vb`: `Imports` and namespaces. Pinned grammar misparses `Inherits`/`Implements`.\nCode: [[../src/lang/vbnet]]","x":380,"y":440,"width":300,"height":200,"color":"4"},
+		{"id":"cmp-lisp","type":"text","text":"## Common Lisp\n*Component: C, tree-sitter*\n`.lisp` `.lsp` `.cl`: `in-package`, `require`, `defpackage :use`. A stand-in for an unconfirmed dialect.\nCode: [[../src/lang/lisp]]","x":760,"y":440,"width":300,"height":200,"color":"4"},
+		{"id":"cmp-js","type":"text","text":"## JavaScript / TypeScript\n*Component: C, tree-sitter*\n`.js` `.mjs` `.cjs` `.jsx` `.ts` `.tsx`: ES imports, `require()`, dynamic `import()`; Node-style resolution plus tsconfig `baseUrl`/`paths`. Registers JS, TS and TSX adapters.\nCode: [[../src/lang/js]]","x":1140,"y":440,"width":300,"height":200,"color":"4"},
+		{"id":"cmp-json","type":"text","text":"## JSON\n*Component: C, tree-sitter*\n`.json`: `\"$ref\"` (JSON Schema / OpenAPI) and relative `\"extends\"`.\nCode: [[../src/lang/json]]","x":0,"y":720,"width":300,"height":200,"color":"4"},
+		{"id":"cmp-sql","type":"text","text":"## SQL\n*Component: C, tree-sitter*\n`.sql`: Links users of tables/views/functions to the file whose `CREATE` made them.\nCode: [[../src/lang/sql]]","x":380,"y":720,"width":300,"height":200,"color":"4"},
+		{"id":"cmp-proto","type":"text","text":"## Protocol Buffers\n*Component: C, tree-sitter*\n`.proto`: `import` / `import public`, matched by path suffix.\nCode: [[../src/lang/proto]]","x":760,"y":720,"width":300,"height":200,"color":"4"},
+		{"id":"cmp-bash","type":"text","text":"## Shell\n*Component: C, tree-sitter*\n`.sh` `.bash`: `source` / `.`, direct and `bash x.sh` runs, `$(dirname \"$0\")` paths.\nCode: [[../src/lang/bash]]","x":1140,"y":720,"width":300,"height":200,"color":"4"},
+		{"id":"cmp-powershell","type":"text","text":"## PowerShell\n*Component: C, tree-sitter*\n`.ps1` `.psm1` `.psd1`: Dot-sourcing, `&` runs, `Import-Module`, manifests. Shares keys with batch via `winscript.c`.\nCode: [[../src/lang/powershell]]","x":0,"y":1000,"width":300,"height":200,"color":"4"},
+		{"id":"cmp-batch","type":"text","text":"## Batch\n*Component: C, tree-sitter*\n`.bat` `.cmd`: `call`, `start`, direct runs, `powershell -File`. Shares keys with PowerShell via `winscript.c`.\nCode: [[../src/lang/batch]]","x":380,"y":1000,"width":300,"height":200,"color":"4"}
+	],
+	"edges":[
+		{"id":"e-wl-pipeline-cmp-registry","fromNode":"wl-pipeline","toNode":"cmp-registry","label":"adapter_registry_init, by-extension lookup"},
+		{"id":"e-cmp-registry-wl-treesitter","fromNode":"cmp-registry","toNode":"wl-treesitter","label":"adapters parse via tree-sitter queries"}
+	]
+}

@@ -1,0 +1,34 @@
+{
+	"nodes":[
+		{"id":"sys-codestellation","type":"group","label":"Codestellation (this repo)","x":-509,"y":-251,"width":1678,"height":930},
+		{"id":"legend","type":"text","text":"## About this map\nCodestellation: nested system-map canvases above a 3D tree-sitter dependency explorer, in one native C app.\nColours: purple person, cyan container, orange data store, green component, yellow tooling, plain external.\nShift+click a box to go in (canvas) or open its code (folders).\nStarter map generated 2026-10-03 by the codestellation-map skill. Check it before trusting it.","x":-662,"y":-519,"width":477,"height":215},
+		{"id":"person-dev","type":"text","text":"## Developer / architect\n*Person*\nMaps a system on nested canvases, then drills into unfamiliar, legacy or multi-language code in 3D and leaves notes on files and lines.","x":492,"y":-432,"width":300,"height":160},
+		{"id":"ctr-app","type":"text","text":"## codemap-view\n*Container: native desktop app, C11 + GLFW + OpenGL 3 + Nuklear*\nOne binary (`Codestellation.app` on macOS). Canvas editor for system maps plus an in-process graph builder and 3D explorer.\nKey: `src/render/main.c`, `src/CMakeLists.txt`\nInside: [[app.canvas]]","x":162,"y":51,"width":300,"height":240,"color":"5"},
+		{"id":"store-project","type":"text","text":"## System-map project\n*Data store: `project.json` + JSON Canvas files*\nA folder the user picks (e.g. this `architecture/`). `project.json` names the root canvas; each `.canvas` holds boxes, groups, edges and links to sub-canvases or code folders. Autosaved on every edit.","x":-484,"y":323,"width":300,"height":240,"color":"2"},
+		{"id":"store-cache","type":"text","text":"## Code cache\n*Data store: per-folder-set directory*\n`~/Library/Application Support/Codestellation/<name>-<hash8>/` holding `graph.json` (networkx node-link), `graph.overlay.json` (dragged positions) and `graph.notes.md` (file/line/group notes). Keyed on the sorted, normalised folder set.","x":-299,"y":-170,"width":306,"height":197,"color":"2"},
+		{"id":"tool-skill","type":"text","text":"## codestellation-map skill\n*Tooling: Claude Code skill + Python validator*\nGenerates a starter C4-style map (like this one) for any repo, then validates links, IDs and layout. Symlinked into `~/.claude/skills/`.\nKey: `SKILL.md`, `scripts/validate.py`\nCode: [[../skills/codestellation-map]]","x":-1335,"y":268,"width":300,"height":240,"color":"3"},
+		{"id":"tool-test-data","type":"text","text":"## test_data\n*Tooling: sample projects*\nA small project per supported language (C, C#, Python, Go, PHP, VB.NET, Lisp, JS/TS, JSON, SQL, proto, shell, PowerShell, batch) plus a sample system map (`project.json`, `root.canvas`).\nCode: [[../test_data]]","x":802,"y":227,"width":300,"height":200,"color":"3"},
+		{"id":"tool-scripts","type":"text","text":"## scripts\n*Tooling: Python*\n`sanity_check.py` loads a built `graph.json` with networkx; `make_icon.py` renders the macOS app icon (numpy).\nCode: [[../scripts]]","x":-979,"y":-155,"width":300,"height":200,"color":"3"},
+		{"id":"tool-build","type":"text","text":"## Build & docs\n*Tooling: CMake (+ Xcode generator)*\n`CMakeLists.txt` fetches deps (`cmake/embed_file.cmake` bakes fonts into C) and builds into `build/` or `build-xcode/` (generated, not linked). Design notes in `NOTES.md`, `doc/system-map-plan.md`; app icon in `resources/macos/`.","x":802,"y":-195,"width":300,"height":200},
+		{"id":"ext-target","type":"text","text":"## Target codebase\n*External system: any folders on disk*\nThe code being explored. Read-only: walked, parsed and linked by file. Skips `node_modules`, `build`, `vendor`, `dist` and similar.","x":-356,"y":831,"width":316,"height":189},
+		{"id":"ext-treesitter","type":"text","text":"## tree-sitter + grammars\n*External system: C libraries via CMake FetchContent*\nParser runtime and 14 grammars (C, C#, Common Lisp, Python, Go, PHP, VB.NET, JS, TS/TSX, JSON, Bash, proto, SQL, PowerShell, batch), statically linked.","x":50,"y":827,"width":303,"height":193},
+		{"id":"ext-glfw","type":"text","text":"## GLFW / OpenGL\n*External system: windowing + GPU*\nGLFW fetched by CMake for window and input; OpenGL from the system framework on macOS, via vendored GLAD elsewhere.","x":425,"y":832,"width":314,"height":186},
+		{"id":"ext-obsidian","type":"text","text":"## Obsidian & JSON Canvas tools\n*External system*\nCan open the same `.canvas` files. Keys outside the JSON Canvas spec are dropped when Codestellation saves.","x":-932,"y":725,"width":300,"height":160},
+		{"id":"ext-reader","type":"text","text":"## Readers & LLMs\n*External system*\nConsume *Export Manual* / *Export LLM Brief* Markdown: every canvas, box, edge and code summary in one document.","x":830,"y":827,"width":317,"height":178},
+		{"id":"ext-claude","type":"text","text":"## Claude Code\n*External system*\nRuns the `codestellation-map` skill against a repo to produce a starter map.","x":-1335,"y":726,"width":300,"height":160}
+	],
+	"edges":[
+		{"id":"e-person-dev-ctr-app","fromNode":"person-dev","fromSide":"bottom","toNode":"ctr-app","toSide":"top","label":"draws maps, explores code (mouse/keyboard)"},
+		{"id":"e-ctr-app-store-project","fromNode":"ctr-app","toNode":"store-project","label":"reads/writes JSON Canvas (autosave)"},
+		{"id":"e-ctr-app-store-cache","fromNode":"ctr-app","fromSide":"top","toNode":"store-cache","toSide":"top","label":"builds & loads graph.json, notes, positions"},
+		{"id":"e-ctr-app-ext-target","fromNode":"ctr-app","fromSide":"bottom","toNode":"ext-target","toSide":"top","label":"walks & parses source folders"},
+		{"id":"e-ctr-app-ext-treesitter","fromNode":"ctr-app","fromSide":"bottom","toNode":"ext-treesitter","toSide":"top","label":"statically linked parsers"},
+		{"id":"e-ctr-app-ext-glfw","fromNode":"ctr-app","fromSide":"bottom","toNode":"ext-glfw","toSide":"top","label":"window, input, GL draw calls"},
+		{"id":"e-ext-obsidian-store-project","fromNode":"ext-obsidian","fromSide":"top","toNode":"store-project","toSide":"bottom","label":"opens the same .canvas files"},
+		{"id":"e-ctr-app-ext-reader","fromNode":"ctr-app","fromSide":"bottom","toNode":"ext-reader","toSide":"top","label":"Export Manual / LLM Brief (Markdown)"},
+		{"id":"e-ext-claude-tool-skill","fromNode":"ext-claude","fromSide":"top","toNode":"tool-skill","toSide":"bottom","label":"runs skill"},
+		{"id":"e-tool-skill-store-project","fromNode":"tool-skill","fromSide":"top","toNode":"store-project","toSide":"top","label":"generates starter map"},
+		{"id":"e-tool-scripts-store-cache","fromNode":"tool-scripts","fromSide":"right","toNode":"store-cache","toSide":"bottom","label":"sanity_check.py reads graph.json"},
+		{"id":"e-tool-test-data-ctr-app","fromNode":"tool-test-data","fromSide":"top","toNode":"ctr-app","toSide":"bottom","label":"sample input per language"}
+	]
+}
