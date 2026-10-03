@@ -628,7 +628,10 @@ void textarea_draw(struct nk_context *ctx, TextArea *ta, const TextAreaMarker *m
                     res.gutter_click_line = line;
                     if (mx < inner.x + marker_w) {
                         for (int i = 0; i < marker_count; i++) {
-                            if (markers[i].line == line) { res.marker_click_id = markers[i].id; break; }
+                            if (markers[i].line == line && markers[i].id >= 0) {
+                                res.marker_click_id = markers[i].id;
+                                break;
+                            }
                         }
                     }
                 }
@@ -698,7 +701,10 @@ void textarea_draw(struct nk_context *ctx, TextArea *ta, const TextAreaMarker *m
     struct nk_color sel_bg = st->selected_normal;
     struct nk_color sel_fg = st->selected_text_normal;
     struct nk_color dim = nk_rgba(fg.r, fg.g, fg.b, 110);
-    struct nk_color marker_color = theme_nk(g_theme.note_dot);
+    struct nk_color dot_color = theme_nk(g_theme.note_dot);
+    struct nk_color ring_color = theme_nk(g_theme.complexity_marker);
+    const char *hover_tip = NULL;
+    bool mouse_in_markers = in && nk_input_is_mouse_hovering_rect(in, intersect(nk_rect(inner.x, inner.y, marker_w, inner.h), old_clip));
     size_t lo = sel_lo(ta), hi = sel_hi(ta);
     float space_w = font_width(f, " ", 1);
 
@@ -710,11 +716,22 @@ void textarea_draw(struct nk_context *ctx, TextArea *ta, const TextAreaMarker *m
         bool line_start = r == 0 || ta->rows[r - 1].line != row->line;
 
         if ((ta->flags & TEXTAREA_GUTTER) && line_start) {
-            for (int i = 0; i < marker_count; i++) {
-                if (markers[i].line == row->line) {
-                    float d = row_h * 0.45f;
-                    nk_fill_circle(canvas, nk_rect(inner.x + (marker_w - d) * 0.5f, y + (row_h - d) * 0.5f, d, d),
-                                   marker_color);
+            float cx = inner.x + marker_w * 0.5f, cy = y + row_h * 0.5f;
+            bool hovered_row = mouse_in_markers && in->mouse.pos.y >= y && in->mouse.pos.y < y + row_h;
+            for (int pass = 0; pass < 2; pass++) { /* rings first, dots on top */
+                int style = pass == 0 ? TEXTAREA_MARKER_RING : TEXTAREA_MARKER_DOT;
+                for (int i = 0; i < marker_count; i++) {
+                    if (markers[i].line != row->line || markers[i].style != style) continue;
+                    if (style == TEXTAREA_MARKER_RING) {
+                        float d = row_h * 0.78f;
+                        nk_stroke_circle(canvas, nk_rect(cx - d * 0.5f, cy - d * 0.5f, d, d), 1.6f, ring_color);
+                    } else {
+                        float d = row_h * 0.42f;
+                        nk_fill_circle(canvas, nk_rect(cx - d * 0.5f, cy - d * 0.5f, d, d), dot_color);
+                    }
+                    /* The ring's tip wins: it says why the line is marked. */
+                    if (hovered_row && markers[i].tip && (!hover_tip || style == TEXTAREA_MARKER_RING))
+                        hover_tip = markers[i].tip;
                     break;
                 }
             }
@@ -753,6 +770,7 @@ void textarea_draw(struct nk_context *ctx, TextArea *ta, const TextAreaMarker *m
         nk_fill_rect(canvas, nk_rect(bar.x, thumb_y, bar.w, thumb_h), bar.w * 0.5f, tc);
     }
     nk_push_scissor(canvas, old_clip);
+    if (hover_tip) nk_tooltip(ctx, hover_tip);
 
     res.focused = ta->focused;
     if (out) *out = res;

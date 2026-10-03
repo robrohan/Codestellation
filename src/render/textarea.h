@@ -33,10 +33,16 @@ enum {
     TEXTAREA_MONO     = 1 << 2, /* monospace font (source code) */
 };
 
-/* A gutter icon on a (1-based) line; `id` comes back when it's clicked. */
+/* A gutter icon on a (1-based) line. A filled dot and a ring can share a
+ * line: the dot draws inside the ring. `id` comes back when the icon is
+ * clicked; a negative id isn't clickable (the click falls through to the
+ * line number). `tip`, if set, shows as a tooltip on hover. */
+enum { TEXTAREA_MARKER_DOT, TEXTAREA_MARKER_RING };
 typedef struct {
     int line;
     int id;
+    int style;
+    const char *tip;
 } TextAreaMarker;
 
 typedef struct {

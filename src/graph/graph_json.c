@@ -57,6 +57,16 @@ static void write_stats(FILE *f, const NodeStats *st) {
         if (v >= 0) fprintf(f, ", \"%s\": %d", INT_STATS[k].key, v);
     }
     if (st->git_last_commit > 0) fprintf(f, ", \"git_last_commit\": %lld", st->git_last_commit);
+    if (st->hot_count > 0) {
+        fprintf(f, ", \"hot_functions\": [");
+        for (int k = 0; k < st->hot_count; k++) {
+            fprintf(f, "%s{\"line\": %d, \"complexity\": %d, \"name\": ", k ? ", " : "", st->hot[k].line,
+                    st->hot[k].complexity);
+            write_escaped(f, st->hot[k].name);
+            fputc('}', f);
+        }
+        fputc(']', f);
+    }
 }
 
 static void read_stats(struct json_object_s *n, NodeStats *st);
@@ -119,6 +129,25 @@ static void read_stats(struct json_object_s *n, NodeStats *st) {
     struct json_value_s *v = obj_get(n, "git_last_commit");
     struct json_number_s *num = v ? json_value_as_number(v) : NULL;
     if (num) st->git_last_commit = atoll(num->number);
+
+    v = obj_get(n, "hot_functions");
+    struct json_array_s *hot = v ? json_value_as_array(v) : NULL;
+    for (struct json_array_element_s *e = hot ? hot->start : NULL; e && st->hot_count < STATS_HOT_MAX; e = e->next) {
+        struct json_object_s *h = json_value_as_object(e->value);
+        if (!h) continue;
+        struct json_value_s *lv = obj_get(h, "line"), *cv = obj_get(h, "complexity"), *nv = obj_get(h, "name");
+        struct json_number_s *ln = lv ? json_value_as_number(lv) : NULL;
+        struct json_number_s *cn = cv ? json_value_as_number(cv) : NULL;
+        struct json_string_s *ns = nv ? json_value_as_string(nv) : NULL;
+        if (!ln || !cn) continue;
+        int k = st->hot_count++;
+        st->hot[k].line = atoi(ln->number);
+        st->hot[k].complexity = atoi(cn->number);
+        size_t nlen = ns ? ns->string_size : 0;
+        if (nlen >= sizeof(st->hot[k].name)) nlen = sizeof(st->hot[k].name) - 1;
+        if (nlen) memcpy(st->hot[k].name, ns->string, nlen);
+        st->hot[k].name[nlen] = '\0';
+    }
 }
 
 bool graph_read_json(const char *path, Graph *out) {

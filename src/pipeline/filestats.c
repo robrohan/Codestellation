@@ -12,7 +12,9 @@
  *     block comment's " * " doesn't make the step look like 1.
  *   - complexity: McCabe-style decision points + 1, counting the adapter's
  *     branch_types (adapter.h). Each function gets its own decisions + 1,
- *     with a nested function's decisions counted in it, not its parent.
+ *     with a nested function's decisions counted in it, not its parent;
+ *     the most complex (STATS_HOT_MIN and up) are kept with their line
+ *     and name in `hot`.
  *
  * Node types are matched by symbol id, not by comparing names per node:
  * the adapter's names are turned into a per-symbol flag table once per
@@ -72,7 +74,53 @@ static bool is_blank_until(const char *src, uint32_t from, uint32_t to) {
 typedef struct {
     uint32_t depth;
     int decisions;
+    TSNode node;
 } FnFrame;
+
+/* A function's name, best effort: its "name" field (most grammars), or
+ * for C-style declarators the identifier at the end of the "declarator"
+ * chain. "" for anonymous functions. */
+static void function_name(const ParsedFile *file, TSNode fn, char *out, size_t cap) {
+    out[0] = '\0';
+    TSNode n = ts_node_child_by_field_name(fn, "name", 4);
+    if (ts_node_is_null(n)) {
+        TSNode d = ts_node_child_by_field_name(fn, "declarator", 10);
+        for (int guard = 0; !ts_node_is_null(d) && guard < 8; guard++) {
+            if (strstr(ts_node_type(d), "identifier")) { n = d; break; }
+            d = ts_node_child_by_field_name(d, "declarator", 10);
+        }
+    }
+    if (ts_node_is_null(n)) return;
+    uint32_t a = ts_node_start_byte(n), b = ts_node_end_byte(n);
+    size_t k = 0;
+    for (uint32_t i = a; i < b && k + 1 < cap; i++) {
+        char c = file->source[i];
+        if (c == '\n' || c == '\r') break;
+        out[k++] = c;
+    }
+    /* Cut short: don't end on half a UTF-8 character. */
+    if (k + 1 >= cap && a + k < b) {
+        while (k > 0 && ((unsigned char)out[k] & 0xC0) == 0x80) k--;
+        while (k > 0 && ((unsigned char)out[k - 1] & 0xC0) == 0xC0) k--;
+    }
+    out[k] = '\0';
+}
+
+/* A finished function: keep it if it's among the most complex so far. */
+static void finish_function(const ParsedFile *file, const FnFrame *fr, int *max_fn, NodeStats *out) {
+    int c = fr->decisions + 1;
+    if (c > *max_fn) *max_fn = c;
+    if (c < STATS_HOT_MIN) return;
+    int at = out->hot_count;
+    while (at > 0 && out->hot[at - 1].complexity < c) at--;
+    if (at >= STATS_HOT_MAX) return;
+    int last = out->hot_count < STATS_HOT_MAX ? out->hot_count : STATS_HOT_MAX - 1;
+    for (int k = last; k > at; k--) out->hot[k] = out->hot[k - 1];
+    out->hot[at].line = (int)ts_node_start_point(fr->node).row + 1;
+    out->hot[at].complexity = c;
+    function_name(file, fr->node, out->hot[at].name, sizeof(out->hot[at].name));
+    if (out->hot_count < STATS_HOT_MAX) out->hot_count++;
+}
 
 void filestats_compute(const ParsedFile *file, const LanguageAdapter *adapter, NodeStats *out) {
     const char *src = file->source;
@@ -109,10 +157,7 @@ void filestats_compute(const ParsedFile *file, const LanguageAdapter *adapter, N
         bool descend = true;
 
         /* Functions at this depth or deeper have been fully walked. */
-        while (fn_count && fns[fn_count - 1].depth >= depth) {
-            int c = fns[--fn_count].decisions + 1;
-            if (c > max_fn) max_fn = c;
-        }
+        while (fn_count && fns[fn_count - 1].depth >= depth) finish_function(file, &fns[--fn_count], &max_fn, out);
 
         if (ts_node_is_error(node) || ts_node_is_missing(node)) parse_errors++;
 
@@ -135,6 +180,7 @@ void filestats_compute(const ParsedFile *file, const LanguageAdapter *adapter, N
             }
             fns[fn_count].depth = depth;
             fns[fn_count].decisions = 0;
+            fns[fn_count].node = node;
             fn_count++;
         }
 
@@ -161,10 +207,7 @@ void filestats_compute(const ParsedFile *file, const LanguageAdapter *adapter, N
         if (done) break;
     }
     ts_tree_cursor_delete(&cursor);
-    while (fn_count) {
-        int c = fns[--fn_count].decisions + 1;
-        if (c > max_fn) max_fn = c;
-    }
+    while (fn_count) finish_function(file, &fns[--fn_count], &max_fn, out);
     free(fns);
     free(flags);
 

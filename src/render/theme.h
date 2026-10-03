@@ -27,6 +27,7 @@ typedef struct {
     ThemeColor label_text;
     ThemeColor label_shadow;    /* drawn 1px down-right, under the text */
     ThemeColor note_dot;
+    ThemeColor complexity_marker; /* ring around a complex function's line (textarea.c) */
 
     /* 2D canvas (canvas_view.c, md_render.c) */
     ThemeColor canvas_background;

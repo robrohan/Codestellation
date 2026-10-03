@@ -189,7 +189,9 @@ scale of line count; see `src/render/nodestyle.h`).
 
 The Inspector shows the selected file with line numbers, wrapped to the
 panel's width. A dot in the margin marks a line with a note: click it to
-open the note, or click any line number to add a note to that line.
+open the note, or click any line number to add a note to that line. A red
+ring marks where each of the file's most complex functions starts (up to
+five, complexity 10 and up); hover it for the function's name and score.
 
 **File stats.** The Inspector's collapsible Stats section shows, for the
 selected file:
@@ -239,8 +241,9 @@ Each node also carries the file stats: `lines`, `blank_lines`,
 `comment_lines`, `max_indent`, `parse_errors`, `complexity`, `functions`,
 `max_function_complexity`, `fan_in`, `fan_out`, `blast_radius`, `cycle_id`
 (files sharing one form a cycle), `cycle_size`, `unresolved`,
-`git_commits`, `git_authors`, `git_last_commit` (unix seconds) and
-`hotspot_rank`. A key that doesn't apply is left out, e.g. no `complexity`
+`git_commits`, `git_authors`, `git_last_commit` (unix seconds),
+`hotspot_rank`, and `hot_functions` (`[{"line", "complexity", "name"}]`,
+the most complex functions first). A key that doesn't apply is left out, e.g. no `complexity`
 for JSON and no `git_*` outside a repo. See `NodeStats` in `src/graph/graph.h`.
 
 Load in Python: `nx.node_link_graph(json.load(f), edges="links")`

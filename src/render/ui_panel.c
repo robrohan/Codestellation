@@ -243,6 +243,10 @@ static void draw_stats(struct nk_context *ctx, const Graph *g, int selected) {
     stat_row(ctx, "Indentation", v);
     if (st->complexity < 0) {
         snprintf(v, sizeof(v), "n/a for %s", g->nodes[selected].language);
+    } else if (st->functions > 0 && st->hot_count > 0) {
+        snprintf(v, sizeof(v), "%d (%d %s, worst %d: %s, line %d)", st->complexity, st->functions,
+                 plural(st->functions, "function", "functions"), st->hot[0].complexity,
+                 st->hot[0].name[0] ? st->hot[0].name : "anonymous", st->hot[0].line);
     } else if (st->functions > 0) {
         snprintf(v, sizeof(v), "%d (%d %s, worst %d)", st->complexity, st->functions,
                  plural(st->functions, "function", "functions"), st->max_function_complexity);
@@ -369,14 +373,23 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h, const Graph 
     const Note *found[64];
     size_t found_n = notes_find_for_path(notes, selected_path, found, 64);
 
-    /* A gutter marker on every line with a note; its id is the index into found. */
-    TextAreaMarker markers[64];
+    /* Gutter markers: a dot on every line with a note (id = index into
+     * found, clickable), and a ring around the start of each of the
+     * file's most complex functions (not clickable; tooltip says why). */
+    TextAreaMarker markers[64 + STATS_HOT_MAX];
+    static char hot_tips[STATS_HOT_MAX][96];
     int marker_n = 0;
     for (size_t i = 0; i < found_n; i++) {
         if (found[i]->has_line) {
-            markers[marker_n].line = found[i]->line;
-            markers[marker_n].id = (int)i;
-            marker_n++;
+            markers[marker_n++] = (TextAreaMarker){ found[i]->line, (int)i, TEXTAREA_MARKER_DOT, NULL };
+        }
+    }
+    if (graph && selected >= 0 && (size_t)selected < graph->node_count) {
+        const NodeStats *st = &graph->nodes[selected].stats;
+        for (int k = 0; k < st->hot_count; k++) {
+            snprintf(hot_tips[k], sizeof(hot_tips[k]), "%s: complexity %d",
+                     st->hot[k].name[0] ? st->hot[k].name : "anonymous function", st->hot[k].complexity);
+            markers[marker_n++] = (TextAreaMarker){ st->hot[k].line, -1, TEXTAREA_MARKER_RING, hot_tips[k] };
         }
     }
 
