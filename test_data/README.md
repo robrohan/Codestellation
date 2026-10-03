@@ -4,8 +4,9 @@ Small sample projects covering every file type Codestellation understands,
 plus a canvas project that ties them together. Two ways to use it:
 
 - **Everything at once:** Properties > Open Folder... on `test_data/`. You should
-  get **88 files in 16 language groups with 79 dependencies** (the 15 folders
-  below plus `project.json`, which counts as a JSON file).
+  get **101 files in 19 language groups with 95 dependencies** (the 17 folders
+  below plus `project.json`, which counts as a JSON file, and this README,
+  which counts as Markdown).
 - **As a system map:** Properties > Open Project... and pick
   `test_data/project.json`. Each language is a box; shift+click one to open
   that folder in 3D and Esc to come back. "Canvas features" goes into a nested
@@ -33,6 +34,8 @@ outside the sample (packages, standard library), which are expected.
 | `bash` | 6 | 6 | 0 | `source`, `.`, `./x.sh`, `bash x.sh`, `$(dirname "$0")/…`, `.bash` |
 | `powershell` | 10 | 11 | 1 | see below (`Az.Accounts` is an installed module) |
 | `batch` | 6 | 6 | 0 | see below |
+| `web` | 7 | 8 | 1 | see below |
+| `markdown` | 5 | 8 | 1 | see below |
 
 ### TypeScript / TSX (`typescript/`)
 
@@ -71,6 +74,34 @@ outside the sample (packages, standard library), which are expected.
 - running `scripts\test.bat` directly; `start "" "%~dp0scripts\notify.bat"`
 - batch -> PowerShell: `powershell -File "%~dp0tools\package.ps1"`
 - `call :cleanup` is a label in the same file, so it is **not** an edge
+
+### HTML / CSS (`web/`)
+
+- `index.html`: `<link href="css/site.css">`, a site-root
+  `<script src="/js/app.js?v=3">` (query string dropped, found by trying each
+  folder above the page), and `<a href=about/>` (unquoted, finds
+  `about/index.html`)
+- skipped, so not unresolved: `#top`, `mailto:`, an `https:` preconnect and
+  `img/logo.png`; `missing.html` is the one unresolved link
+- `about/index.html` -> `../css/site.css` and `../index.html`
+- `css/site.css`: `@import "base.css"` and `@import url(theme.css) screen`;
+  its `url(../img/bg.png)` is an image and `theme.css`'s `https:` import is
+  external, so neither counts
+- `js/app.js` -> `js/util.js` (the JavaScript adapter, as usual)
+
+### Markdown (`markdown/`)
+
+- `README.md`: `[guide](docs/guide.md#setup)`, `[[Changelog]]`, a reference
+  definition `[api]: ./docs/api.md`, and a link to `scripts/build.sh` (a
+  Markdown -> shell edge). The image, the `https:` link and the link inside a
+  code span don't count.
+- `docs/guide.md`: `[[README]]` (the nearest `README.md`, not
+  `test_data/README.md`), `[[docs/api|the API]]` (found by note name), the
+  embed `![[Changelog]]`, and `missing.md`, the one unresolved link. The
+  link inside a fenced code block doesn't count.
+- `docs/api.md` -> `guide.md` from inside a table cell
+- `Changelog.md` has no links: a stray backtick in one paragraph must not
+  pair with one in the next and turn its code span into a wiki link
 
 ### VB.NET: known limitation
 

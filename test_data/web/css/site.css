@@ -1,0 +1,6 @@
+@import "base.css";
+@import url(theme.css) screen;
+
+body {
+  background: url(../img/bg.png) no-repeat;
+}

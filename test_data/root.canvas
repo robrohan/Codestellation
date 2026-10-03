@@ -1,6 +1,6 @@
 {
 	"nodes":[
-		{"id":"group-langs","type":"group","label":"One box per language folder","x":-40,"y":-60,"width":1320,"height":820},
+		{"id":"group-langs","type":"group","label":"One box per language folder","x":-40,"y":-60,"width":1320,"height":1010},
 		{"id":"lang-c","type":"text","text":"## C\n`#include` between .c/.h files\n\nShift+click: [[c]]","x":0,"y":0,"width":280,"height":150,"color":"1"},
 		{"id":"lang-csharp","type":"text","text":"## C#\nnamespaces, `using`, type references\n\nShift+click: [[csharp]]","x":320,"y":0,"width":280,"height":150,"color":"6"},
 		{"id":"lang-python","type":"text","text":"## Python\n`import`, `from … import`, relative imports, a `.pyi` stub\n\nShift+click: [[python]]","x":640,"y":0,"width":280,"height":150,"color":"3"},
@@ -17,12 +17,15 @@
 		{"id":"intro","type":"text","text":"# Codestellation test data\nEvery supported file type, as small projects.\n\n- **Shift+click** a language box to open its code in 3D; Esc comes back\n- Shift+click **Canvas features** to go into a nested canvas\n- **Cmd+F** searches every canvas\n\nExpected results: `test_data/README.md`","x":-40,"y":-380,"width":460,"height":260},
 		{"id":"nested","type":"text","text":"## Canvas features\nA nested canvas with a weak link back to the TypeScript box.\n\n[[canvas-features.canvas]]","x":480,"y":-380,"width":320,"height":170,"color":"4"},
 		{"id":"lang-powershell","type":"text","text":"## PowerShell\ndot-sourcing, `Import-Module`, `using module`, `.psd1` manifests, runs a `.bat`\n\nShift+click: [[powershell]]","x":320,"y":570,"width":280,"height":150,"color":"5"},
-		{"id":"lang-batch","type":"text","text":"## Batch / CMD\n`call`, `%~dp0`, direct runs, `start`, `powershell -File` a `.ps1`\n\nShift+click: [[batch]]","x":640,"y":570,"width":280,"height":150,"color":"1"}
+		{"id":"lang-batch","type":"text","text":"## Batch / CMD\n`call`, `%~dp0`, direct runs, `start`, `powershell -File` a `.ps1`\n\nShift+click: [[batch]]","x":640,"y":570,"width":280,"height":150,"color":"1"},
+		{"id":"lang-web","type":"text","text":"## HTML / CSS\n`<script src>`, `<link href>`, `<a href>`, site-root `/js/...`, CSS `@import`\n\nShift+click: [[web]]","x":960,"y":570,"width":280,"height":150,"color":"3"},
+		{"id":"lang-markdown","type":"text","text":"## Markdown\n`[text](path)`, reference definitions, Obsidian-style wiki links\n\nShift+click: [[markdown]]","x":0,"y":760,"width":280,"height":150,"color":"5"}
 	],
 	"edges":[
 		{"id":"e1","fromNode":"lang-typescript","toNode":"lang-json","label":"imports config.json"},
 		{"id":"e2","fromNode":"lang-javascript","toNode":"lang-typescript","label":"same adapter"},
 		{"id":"e3","fromNode":"intro","toNode":"nested"},
-		{"id":"e4","fromNode":"lang-batch","toNode":"lang-powershell","label":"calls each other"}
+		{"id":"e4","fromNode":"lang-batch","toNode":"lang-powershell","label":"calls each other"},
+		{"id":"e5","fromNode":"lang-web","toNode":"lang-javascript","label":"<script src>"}
 	]
 }

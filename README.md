@@ -40,6 +40,9 @@ Codestellation is built for digging through unfamiliar, legacy, or "vibe coded" 
 | Shell | `.sh` `.bash` | `source` / `.`, `./script.sh`, `bash script.sh`, `$(dirname "$0")/...` |
 | PowerShell | `.ps1` `.psm1` `.psd1` | dot-sourcing, `&` and direct runs, `Import-Module` (path, module folder or name), `using module`, `.psd1` manifest entries |
 | Batch | `.bat` `.cmd` | `call` (including `%~dp0`), direct runs, `start`, scripts passed to `powershell -File` / `cmd /c` |
+| HTML | `.html` `.htm` | `src` / `href` attributes: `<script src>`, `<link href>`, `<a href>`, `<iframe src>` |
+| CSS | `.css` | `@import`, and `url(...)` pointing at another stylesheet |
+| Markdown | `.md` `.markdown` | `[text](path)` links, `[ref]: path` definitions, Obsidian `[[wiki links]]` and `![[embeds]]` |
 
 Notes:
 
@@ -51,6 +54,14 @@ Notes:
   file that created what they use.
 - **PowerShell and batch** scripts that call each other are linked.
   `$PSScriptRoot` and `%~dp0` mean "this script's folder".
+- **HTML, CSS and Markdown** links are file paths, so they can point at any
+  file whose adapter declares its path (C, JS/TS, JSON, PHP, Python, shell,
+  and these three). Other sites, `#anchors`, `mailto:` and the like are
+  skipped, as are images, fonts and media. A link starting with `/` is
+  site-root relative; since the root isn't known, it's tried against each
+  folder above the page. Inline `<script>` and `<style>` bodies aren't
+  parsed. A Markdown `[[wiki link]]` finds the nearest note of that name,
+  as Obsidian does.
 - **Python, Go and Protocol Buffers** have no in-source module identity, so
   they match imports by path suffix -- a documented best guess. See the
   header comments in `src/lang/python/python_adapter.c` and

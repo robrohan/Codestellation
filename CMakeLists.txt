@@ -266,6 +266,51 @@ FetchContent_Populate(ts_batch)
 add_library(tree_sitter_batch STATIC ${ts_batch_SOURCE_DIR}/src/parser.c)
 target_include_directories(tree_sitter_batch PUBLIC ${ts_batch_SOURCE_DIR}/src)
 
+# --- tree-sitter-html grammar (HTML adapter) ----------------------------
+# Generated parser.c + an external scanner (tag matching).
+FetchContent_Declare(ts_html
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-html
+    GIT_TAG v0.23.2
+    GIT_SHALLOW TRUE
+)
+FetchContent_Populate(ts_html)
+add_library(tree_sitter_html STATIC
+    ${ts_html_SOURCE_DIR}/src/parser.c
+    ${ts_html_SOURCE_DIR}/src/scanner.c)
+target_include_directories(tree_sitter_html PUBLIC ${ts_html_SOURCE_DIR}/src)
+
+# --- tree-sitter-css grammar (CSS adapter) ------------------------------
+# Generated parser.c + an external scanner.
+FetchContent_Declare(ts_css
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-css
+    GIT_TAG v0.25.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_Populate(ts_css)
+add_library(tree_sitter_css STATIC
+    ${ts_css_SOURCE_DIR}/src/parser.c
+    ${ts_css_SOURCE_DIR}/src/scanner.c)
+target_include_directories(tree_sitter_css PUBLIC ${ts_css_SOURCE_DIR}/src)
+
+# --- tree-sitter-markdown grammars (Markdown adapter) --------------------
+# One repo, two grammars: the block grammar the pipeline parses each file
+# with, and the inline grammar the adapter runs over the block tree's
+# inline ranges (links live there). Each has its own external scanner.
+FetchContent_Declare(ts_markdown
+    GIT_REPOSITORY https://github.com/tree-sitter-grammars/tree-sitter-markdown
+    GIT_TAG v0.5.3
+    GIT_SHALLOW TRUE
+)
+FetchContent_Populate(ts_markdown)
+add_library(tree_sitter_markdown STATIC
+    ${ts_markdown_SOURCE_DIR}/tree-sitter-markdown/src/parser.c
+    ${ts_markdown_SOURCE_DIR}/tree-sitter-markdown/src/scanner.c)
+target_include_directories(tree_sitter_markdown PUBLIC ${ts_markdown_SOURCE_DIR}/tree-sitter-markdown/src)
+add_library(tree_sitter_markdown_inline STATIC
+    ${ts_markdown_SOURCE_DIR}/tree-sitter-markdown-inline/src/parser.c
+    ${ts_markdown_SOURCE_DIR}/tree-sitter-markdown-inline/src/scanner.c)
+target_include_directories(tree_sitter_markdown_inline PUBLIC ${ts_markdown_SOURCE_DIR}/tree-sitter-markdown-inline/src)
+
 # --- GLFW (window/input/GL context, cross-platform) ----------------------
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)

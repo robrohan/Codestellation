@@ -13,6 +13,9 @@
 #include "sql/sql_adapter.h"
 #include "powershell/powershell_adapter.h"
 #include "batch/batch_adapter.h"
+#include "html/html_adapter.h"
+#include "css/css_adapter.h"
+#include "markdown/markdown_adapter.h"
 #include <string.h>
 
 #define MAX_ADAPTERS 32
@@ -39,6 +42,9 @@ void adapter_registry_init(void) {
     g_adapters[g_adapter_count++] = sql_adapter_get();
     g_adapters[g_adapter_count++] = powershell_adapter_get();
     g_adapters[g_adapter_count++] = batch_adapter_get();
+    g_adapters[g_adapter_count++] = html_adapter_get();
+    g_adapters[g_adapter_count++] = css_adapter_get();
+    g_adapters[g_adapter_count++] = markdown_adapter_get();
 }
 
 const LanguageAdapter *adapter_for_extension(const char *ext) {
