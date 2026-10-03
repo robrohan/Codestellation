@@ -3,6 +3,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+void node_stats_init(NodeStats *s) {
+    memset(s, 0, sizeof(*s));
+    s->complexity = s->functions = s->max_function_complexity = -1;
+    s->blast_radius = -1;
+    s->cycle_id = -1;
+    s->git_commits = s->git_authors = -1;
+}
+
 void graph_init(Graph *g) {
     memset(g, 0, sizeof(*g));
 }
@@ -16,6 +24,7 @@ int graph_add_node(Graph *g, const char *path, const char *language) {
     g->nodes[g->node_count].id = id;
     g->nodes[g->node_count].path = xstrdup(path);
     g->nodes[g->node_count].language = xstrdup(language);
+    node_stats_init(&g->nodes[g->node_count].stats);
     g->node_count++;
     return id;
 }

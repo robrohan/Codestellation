@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* Cache the last-loaded file so it isn't re-read from disk every frame. */
 static char *g_cached_path = NULL;
@@ -212,7 +213,138 @@ static void draw_group_mode(struct nk_context *ctx, const char **cluster_paths, 
     }
 }
 
-static void draw_single_mode(struct nk_context *ctx, float panel_h,
+/* ---- Stats section ------------------------------------------------- */
+
+#define STATS_ROW_H 16.0f
+#define STATS_MAX_CYCLE_NAMES 4
+
+static enum nk_collapse_states g_stats_state = NK_MAXIMIZED;
+
+static const char *base_name(const char *path) {
+    const char *slash = strrchr(path, '/');
+    const char *bslash = strrchr(path, '\\');
+    if (slash && (!bslash || slash > bslash)) return slash + 1;
+    return bslash ? bslash + 1 : path;
+}
+
+/* Other files in the selected file's cycle (up to `cap`), and how many
+ * there are in all. */
+static int cycle_mates(const Graph *g, int selected, const char **out, int cap) {
+    int id = g->nodes[selected].stats.cycle_id, n = 0;
+    if (id < 0) return 0;
+    for (size_t i = 0; i < g->node_count; i++) {
+        if ((int)i == selected || g->nodes[i].stats.cycle_id != id) continue;
+        if (n < cap) out[n] = base_name(g->nodes[i].path);
+        n++;
+    }
+    return n;
+}
+
+/* Rows the section will draw below its header -- so the file viewer under
+ * it can be given exactly the height that's left. */
+static int stats_row_count(const Graph *g, int selected) {
+    const NodeStats *st = &g->nodes[selected].stats;
+    if (!st->has_stats) return 2;
+    int rows = 11; /* lines, indent, complexity, in, out, blast, cycle, unresolved, parse errors, git, hotspot */
+    if (st->git_last_commit > 0) rows++;
+    if (st->cycle_size > 1) {
+        int mates = st->cycle_size - 1;
+        rows += mates > STATS_MAX_CYCLE_NAMES ? STATS_MAX_CYCLE_NAMES + 1 : mates;
+    }
+    return rows;
+}
+
+static void stat_row(struct nk_context *ctx, const char *label, const char *value) {
+    static const float ratio[] = { 0.38f, 0.62f };
+    nk_layout_row(ctx, NK_DYNAMIC, STATS_ROW_H, 2, ratio);
+    nk_label(ctx, label, NK_TEXT_LEFT);
+    nk_label(ctx, value, NK_TEXT_LEFT);
+}
+
+static const char *plural(int n, const char *one, const char *many) {
+    return n == 1 ? one : many;
+}
+
+static void draw_stats(struct nk_context *ctx, const Graph *g, int selected) {
+    const NodeStats *st = &g->nodes[selected].stats;
+    char v[160];
+    if (!st->has_stats) {
+        nk_layout_row_dynamic(ctx, STATS_ROW_H, 1);
+        nk_label(ctx, "This graph was built before stats existed.", NK_TEXT_LEFT);
+        nk_label(ctx, "Open the folder again to rebuild it.", NK_TEXT_LEFT);
+        return;
+    }
+
+    snprintf(v, sizeof(v), "%d (%d blank, %d with comments)", st->lines, st->blank_lines, st->comment_lines);
+    stat_row(ctx, "Lines", v);
+    snprintf(v, sizeof(v), "%d %s deep", st->max_indent, plural(st->max_indent, "level", "levels"));
+    stat_row(ctx, "Indentation", v);
+    if (st->complexity < 0) {
+        snprintf(v, sizeof(v), "n/a for %s", g->nodes[selected].language);
+    } else if (st->functions > 0) {
+        snprintf(v, sizeof(v), "%d (%d %s, worst %d)", st->complexity, st->functions,
+                 plural(st->functions, "function", "functions"), st->max_function_complexity);
+    } else {
+        snprintf(v, sizeof(v), "%d", st->complexity);
+    }
+    stat_row(ctx, "Complexity", v);
+
+    snprintf(v, sizeof(v), "%d %s", st->fan_in, plural(st->fan_in, "file", "files"));
+    stat_row(ctx, "Depended on by", v);
+    snprintf(v, sizeof(v), "%d %s", st->fan_out, plural(st->fan_out, "file", "files"));
+    stat_row(ctx, "Depends on", v);
+    if (st->blast_radius < 0) snprintf(v, sizeof(v), "not computed (graph too large)");
+    else snprintf(v, sizeof(v), "%d %s, directly or not", st->blast_radius, plural(st->blast_radius, "file", "files"));
+    stat_row(ctx, "Blast radius", v);
+
+    if (st->cycle_size > 1) {
+        const char *names[STATS_MAX_CYCLE_NAMES];
+        int mates = cycle_mates(g, selected, names, STATS_MAX_CYCLE_NAMES);
+        snprintf(v, sizeof(v), "with %d other %s:", mates, plural(mates, "file", "files"));
+        stat_row(ctx, "In a cycle", v);
+        int shown = mates < STATS_MAX_CYCLE_NAMES ? mates : STATS_MAX_CYCLE_NAMES;
+        for (int i = 0; i < shown; i++) stat_row(ctx, "", names[i]);
+        if (mates > shown) {
+            snprintf(v, sizeof(v), "and %d more", mates - shown);
+            stat_row(ctx, "", v);
+        }
+    } else {
+        stat_row(ctx, "In a cycle", "no");
+    }
+
+    snprintf(v, sizeof(v), "%d", st->unresolved);
+    stat_row(ctx, "Unresolved refs", v);
+    if (st->parse_errors > 0) snprintf(v, sizeof(v), "%d (some links may be missing)", st->parse_errors);
+    else snprintf(v, sizeof(v), "0");
+    stat_row(ctx, "Parse errors", v);
+
+    if (st->git_commits < 0) {
+        snprintf(v, sizeof(v), "not in a git repo");
+    } else if (st->git_commits == 0) {
+        snprintf(v, sizeof(v), "never committed");
+    } else {
+        snprintf(v, sizeof(v), "%d %s by %d %s", st->git_commits, plural(st->git_commits, "commit", "commits"),
+                 st->git_authors, plural(st->git_authors, "author", "authors"));
+    }
+    stat_row(ctx, "Git history", v);
+    if (st->git_last_commit > 0) {
+        time_t t = (time_t)st->git_last_commit;
+        struct tm *tm = localtime(&t);
+        if (!tm || strftime(v, sizeof(v), "%Y-%m-%d", tm) == 0) snprintf(v, sizeof(v), "?");
+        stat_row(ctx, "Last commit", v);
+    }
+
+    if (st->hotspot_rank > 0) {
+        int ranked = 0;
+        for (size_t i = 0; i < g->node_count; i++) if (g->nodes[i].stats.hotspot_rank > 0) ranked++;
+        snprintf(v, sizeof(v), "#%d of %d (commits x complexity)", st->hotspot_rank, ranked);
+    } else {
+        snprintf(v, sizeof(v), "not ranked");
+    }
+    stat_row(ctx, "Hotspot", v);
+}
+
+static void draw_single_mode(struct nk_context *ctx, float panel_h, const Graph *graph, int selected,
                               const char *selected_path, const char *selected_language,
                               NoteSet *notes, const char *notes_md_path) {
     load_file_if_needed(selected_path);
@@ -232,6 +364,19 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h,
     nk_layout_row_dynamic(ctx, 40, 1);
     nk_label_wrap(ctx, selected_path);
 
+    /* Stats, collapsible; its height comes out of the file viewer's. */
+    float stats_h = 0.0f;
+    bool have_node = graph && selected >= 0 && (size_t)selected < graph->node_count;
+    if (have_node) {
+        float pitch = STATS_ROW_H + ctx->style.window.spacing.y;
+        stats_h = 24.0f + ctx->style.window.spacing.y;
+        if (nk_tree_state_push(ctx, NK_TREE_TAB, "Stats", &g_stats_state)) {
+            draw_stats(ctx, graph, selected);
+            stats_h += pitch * (float)stats_row_count(graph, selected);
+            nk_tree_pop(ctx);
+        }
+    }
+
     /* Reserve fixed heights for everything below the content viewer
      * (notes label, notes list, the add-note button), same "whatever's
      * left" approach as before -- just a much smaller reservation now
@@ -244,7 +389,7 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h,
      * completely ordinary-sized content (nothing actually needing to
      * scroll). Better to keep a bit of daylight than fight that again. */
     const float notes_label_h = 20.0f, notes_list_h = 150.0f, add_button_h = 30.0f;
-    const float reserved = 140.0f + notes_label_h + notes_list_h + add_button_h;
+    const float reserved = 140.0f + stats_h + notes_label_h + notes_list_h + add_button_h;
     float content_h = panel_h - reserved;
     if (content_h < 60.0f) content_h = 60.0f;
 
@@ -295,6 +440,7 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h,
 }
 
 void ui_panel_draw(struct nk_context *ctx, int window_width, int window_height,
+                    const Graph *graph, int selected,
                     const char *selected_path, const char *selected_language,
                     const char **cluster_paths, size_t cluster_count,
                     NoteSet *notes, const char *notes_md_path,
@@ -318,7 +464,7 @@ void ui_panel_draw(struct nk_context *ctx, int window_width, int window_height,
             draw_group_mode(ctx, cluster_paths, cluster_count, notes, notes_md_path);
         } else {
             struct nk_vec2 size = nk_window_get_size(ctx);
-            draw_single_mode(ctx, size.y, selected_path, selected_language, notes, notes_md_path);
+            draw_single_mode(ctx, size.y, graph, selected, selected_path, selected_language, notes, notes_md_path);
         }
     } else if (nk_window_is_collapsed(ctx, UI_PANEL_TITLE)) {
         /* nk_begin/nk_panel_begin returns false for a MINIMIZED window,

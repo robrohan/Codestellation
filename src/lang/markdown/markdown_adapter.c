@@ -18,7 +18,7 @@
  *     (weblink_resolve). A wiki link is tried as a path from the note's
  *     folder and then each ancestor folder (".md" appended), so the
  *     nearest match wins, as in Obsidian; failing that, by note name
- *     anywhere, where the first note parsed wins a tie.
+ *     anywhere, where the last note parsed wins a tie.
  *
  * tree-sitter-markdown is two grammars (v0.5.3): the block grammar that
  * the pipeline parses with, whose `inline` and `pipe_table_cell` nodes are

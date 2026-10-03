@@ -25,6 +25,7 @@
 #include "layout3d.h"
 #include "gl_scene.h"
 #include "dircolor.h"
+#include "nodestyle.h"
 #include "picking.h"
 #include "ui_panel.h"
 #include "note_compose.h"
@@ -134,6 +135,7 @@ typedef struct {
     NoteSet notes;
     Vec3 *positions;
     float *colors;
+    float *sizes;  /* point size per node, see nodestyle.h */
     unsigned int *edge_indices;
 } LoadedGraph;
 
@@ -178,6 +180,10 @@ static bool loaded_graph_load(LoadedGraph *lg, const char *graph_path) {
     lg->colors = (float *)malloc(graph.node_count * 3 * sizeof(float));
     dircolor_compute(&lg->graph, lg->colors);
 
+    /* Size by file length -- also static per node. */
+    lg->sizes = (float *)malloc(graph.node_count * sizeof(float));
+    nodestyle_compute(&lg->graph, lg->sizes);
+
     /* Overlay any manually-dragged positions on top of the fresh layout.
      * A hash mismatch (the file changed since the position was saved) is
      * advisory, not blocking -- the position still applies. */
@@ -204,6 +210,7 @@ static bool loaded_graph_load(LoadedGraph *lg, const char *graph_path) {
 static void loaded_graph_free(LoadedGraph *lg) {
     free(lg->positions);
     free(lg->colors);
+    free(lg->sizes);
     free(lg->edge_indices);
     graph_free(&lg->graph);
     overlay_free(&lg->overlay);
@@ -218,7 +225,7 @@ static void loaded_graph_free(LoadedGraph *lg) {
  * per-selection overlays (their node ids belonged to the old graph), and
  * re-frames the camera on the new data. */
 static void loaded_graph_show(const LoadedGraph *lg, GLScene *scene, Camera *camera) {
-    gl_scene_upload(scene, (const float *)lg->positions, lg->colors, lg->graph.node_count,
+    gl_scene_upload(scene, (const float *)lg->positions, lg->colors, lg->sizes, lg->graph.node_count,
                     lg->edge_indices, lg->graph.edge_count);
     gl_scene_set_highlighted_edges(scene, NULL, 0);
     gl_scene_set_cluster_points(scene, NULL, 0);
@@ -735,7 +742,8 @@ int main(int argc, char **argv) {
                 inspector_bounds = (PanelRect){ 0, 0, 0, 0 };
                 note_bounds = (PanelRect){ 0, 0, 0, 0 };
             } else {
-                ui_panel_draw(ctx, width, height, sel_path, sel_lang, cluster_paths, cluster_count,
+                ui_panel_draw(ctx, width, height, &lg.graph, selected, sel_path, sel_lang,
+                              cluster_paths, cluster_count,
                               &lg.notes, lg.notes_path, &inspector_bounds);
                 note_compose_draw(ctx, &lg.notes, lg.notes_path, &note_bounds);
             }

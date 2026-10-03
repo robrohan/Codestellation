@@ -205,6 +205,10 @@ static char *ps_resolve_reference(const char *raw_text, const char *referencing_
     return winscript_resolve(raw_text, referencing_file_path, symbol_table_handle);
 }
 
+/* Complexity stats (see adapter.h). */
+static const char *const PS_BRANCH_TYPES[] = { "if_statement", "elseif_clause", "for_statement", "foreach_statement", "while_statement", "do_statement", "switch_clause", "catch_clause", "-and", "-or", NULL };
+static const char *const PS_FUNCTION_TYPES[] = { "function_statement", "class_method_definition", NULL };
+
 static LanguageAdapter g_ps_adapter;
 static int g_initialized = 0;
 
@@ -219,6 +223,8 @@ const LanguageAdapter *powershell_adapter_get(void) {
         g_ps_adapter.extract_declarations = ps_extract_declarations;
         g_ps_adapter.extract_references = ps_extract_references;
         g_ps_adapter.resolve_reference = ps_resolve_reference;
+        g_ps_adapter.branch_types = PS_BRANCH_TYPES;
+        g_ps_adapter.function_types = PS_FUNCTION_TYPES;
         g_initialized = 1;
     }
     return &g_ps_adapter;

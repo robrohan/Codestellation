@@ -2,6 +2,9 @@
 #include "walk.h"
 #include "parse.h"
 #include "resolve.h"
+#include "filestats.h"
+#include "graphstats.h"
+#include "gitstats.h"
 #include "../lang/registry.h"
 #include "../graph/graph.h"
 #include "../graph/graph_json.h"
@@ -52,6 +55,15 @@ bool build_graph_json(const char *const *roots, size_t root_count, const char *o
     resolve_build_graph(&parsed, &graph, &unresolved);
     printf("graph: %zu nodes, %zu edges (%d unresolved references)\n",
            graph.node_count, graph.edge_count, unresolved);
+
+    /* Node i is parsed.entries[i] (resolve_build_graph adds them in order). */
+    for (size_t i = 0; i < parsed.count && i < graph.node_count; i++) {
+        filestats_compute(&parsed.entries[i].parsed, parsed.entries[i].adapter, &graph.nodes[i].stats);
+    }
+    graphstats_compute(&graph);
+    gitstats_compute(&graph, roots, root_count);
+    graphstats_rank_hotspots(&graph);
+    printf("stats: done\n");
 
     bool ok = graph_write_json(&graph, out_path);
     if (ok) printf("wrote %s\n", out_path);

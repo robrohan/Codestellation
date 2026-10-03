@@ -315,6 +315,10 @@ static char *python_resolve_reference(const char *raw_text,
     return NULL;
 }
 
+/* Complexity stats (see adapter.h). */
+static const char *const PYTHON_BRANCH_TYPES[] = { "if_statement", "elif_clause", "for_statement", "while_statement", "except_clause", "case_clause", "conditional_expression", "for_in_clause", "if_clause", "and", "or", NULL };
+static const char *const PYTHON_FUNCTION_TYPES[] = { "function_definition", "lambda", NULL };
+
 static LanguageAdapter g_python_adapter;
 static int g_initialized = 0;
 
@@ -329,6 +333,8 @@ const LanguageAdapter *python_adapter_get(void) {
         g_python_adapter.extract_declarations = python_extract_declarations;
         g_python_adapter.extract_references = python_extract_references;
         g_python_adapter.resolve_reference = python_resolve_reference;
+        g_python_adapter.branch_types = PYTHON_BRANCH_TYPES;
+        g_python_adapter.function_types = PYTHON_FUNCTION_TYPES;
         g_initialized = 1;
     }
     return &g_python_adapter;

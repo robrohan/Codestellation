@@ -184,7 +184,32 @@ component's full breadcrumb path in its heading.
 dependency graph and shows it in 3D: left-drag empty space to orbit, scroll
 to zoom, right-click a node to inspect its file, drag a node to reposition
 it (it stays put -- layout is computed once at load, not a continuous
-simulation). Esc quits from here.
+simulation). Esc quits from here. Longer files are drawn bigger (on a log
+scale of line count; see `src/render/nodestyle.h`).
+
+**File stats.** The Inspector's collapsible Stats section shows, for the
+selected file:
+
+- **Lines**, blank lines, and lines with comments on them.
+- **Indentation**: the deepest indent, in the file's own indent steps. It
+  works in any language and stands in for nesting depth.
+- **Complexity**: decision points + 1 (`if`, loops, `case`, `catch`, `?:`,
+  `&&`/`||`...), with the function count and the most complex function.
+  Only for languages with real control flow: "n/a" for JSON, CSS, HTML,
+  Markdown, proto, SQL and Lisp (that grammar has no `if` node to count).
+- **Depended on by / depends on**: distinct files, and the **blast radius**:
+  how many files depend on this one directly or through others (skipped on
+  graphs of more than about 20,000 files).
+- **In a cycle**: the other files in its dependency cycle, if any.
+- **Unresolved refs** and **parse errors**: how far to trust this file's
+  edges.
+- **Git history**: commits, authors and last commit date (merges skipped,
+  renames not followed), and the **hotspot** rank: commits x complexity,
+  highest first. Files whose folder isn't in a git repo show none of this.
+  On macOS git is only run when the developer tools are installed.
+
+Stats are worked out when the graph is built, so a `graph.json` from an
+older build shows a note to reopen the folder instead.
 
 Optional sanity check of a built graph (needs networkx), pointed at the
 cached `graph.json` in the project's Application Support folder:
@@ -200,10 +225,19 @@ networkx "node-link" format:
 {
   "directed": true,
   "graph": {},
-  "nodes": [{"id": 0, "path": "/abs/path/foo.c", "language": "c"}],
+  "nodes": [{"id": 0, "path": "/abs/path/foo.c", "language": "c",
+             "lines": 120, "complexity": 14, "fan_in": 3, "git_commits": 9, ...}],
   "links": [{"source": 0, "target": 1, "kind": "import"}]
 }
 ```
+
+Each node also carries the file stats: `lines`, `blank_lines`,
+`comment_lines`, `max_indent`, `parse_errors`, `complexity`, `functions`,
+`max_function_complexity`, `fan_in`, `fan_out`, `blast_radius`, `cycle_id`
+(files sharing one form a cycle), `cycle_size`, `unresolved`,
+`git_commits`, `git_authors`, `git_last_commit` (unix seconds) and
+`hotspot_rank`. A key that doesn't apply is left out, e.g. no `complexity`
+for JSON and no `git_*` outside a repo. See `NodeStats` in `src/graph/graph.h`.
 
 Load in Python: `nx.node_link_graph(json.load(f), edges="links")`
 (older networkx: drop the `edges` kwarg).
@@ -219,6 +253,10 @@ blocks), add the adapter `.c` and its `tree_sitter_*` library to
 `src/CMakeLists.txt`'s `Codestellation` target, register it in
 `src/lang/registry.c`, and write an adapter implementing
 `extract_declarations`/`extract_references`/`resolve_reference`.
+For complexity stats, also set `branch_types` and `function_types`: lists of
+the grammar's node type names for decision points and functions (check them
+against the grammar's `src/node-types.json`; leave them NULL for data or
+markup languages).
 `src/lang/c/c_adapter.c` is the simplest example (no symbol table,
 path-based deps, flat query); `src/lang/csharp/csharp_adapter.c` shows
 scoped namespace/type resolution by walking the parse tree directly

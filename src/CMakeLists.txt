@@ -38,6 +38,9 @@ add_executable(Codestellation
     pipeline/parse.c
     pipeline/resolve.c
     pipeline/build_graph.c
+    pipeline/filestats.c
+    pipeline/graphstats.c
+    pipeline/gitstats.c
     lang/registry.c
     lang/c/c_adapter.c
     lang/csharp/csharp_adapter.c
@@ -66,6 +69,7 @@ add_executable(Codestellation
     render/layout3d.c
     render/dirgroup.c
     render/dircolor.c
+    render/nodestyle.c
     render/gl_scene.c
     render/picking.c
     render/ui_panel.c

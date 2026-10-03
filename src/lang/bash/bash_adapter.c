@@ -229,6 +229,10 @@ static char *bash_resolve_reference(const char *raw_text, const char *referencin
     return NULL;
 }
 
+/* Complexity stats (see adapter.h). */
+static const char *const BASH_BRANCH_TYPES[] = { "if_statement", "elif_clause", "for_statement", "c_style_for_statement", "while_statement", "case_item", "ternary_expression", "&&", "||", NULL };
+static const char *const BASH_FUNCTION_TYPES[] = { "function_definition", NULL };
+
 static LanguageAdapter g_bash_adapter;
 static int g_initialized = 0;
 
@@ -243,6 +247,8 @@ const LanguageAdapter *bash_adapter_get(void) {
         g_bash_adapter.extract_declarations = bash_extract_declarations;
         g_bash_adapter.extract_references = bash_extract_references;
         g_bash_adapter.resolve_reference = bash_resolve_reference;
+        g_bash_adapter.branch_types = BASH_BRANCH_TYPES;
+        g_bash_adapter.function_types = BASH_FUNCTION_TYPES;
         g_initialized = 1;
     }
     return &g_bash_adapter;
