@@ -438,6 +438,10 @@ static char *php_resolve_reference(const char *raw_text,
     return resolve_as_path(raw_text, referencing_file_path, table);
 }
 
+/* Complexity stats (see adapter.h). */
+static const char *const PHP_BRANCH_TYPES[] = { "if_statement", "else_if_clause", "for_statement", "foreach_statement", "while_statement", "do_statement", "case_statement", "catch_clause", "conditional_expression", "match_conditional_expression", "&&", "||", "and", "or", "??", NULL };
+static const char *const PHP_FUNCTION_TYPES[] = { "function_definition", "method_declaration", "anonymous_function", "arrow_function", NULL };
+
 static LanguageAdapter g_php_adapter;
 static int g_initialized = 0;
 
@@ -452,6 +456,8 @@ const LanguageAdapter *php_adapter_get(void) {
         g_php_adapter.extract_declarations = php_extract_declarations;
         g_php_adapter.extract_references = php_extract_references;
         g_php_adapter.resolve_reference = php_resolve_reference;
+        g_php_adapter.branch_types = PHP_BRANCH_TYPES;
+        g_php_adapter.function_types = PHP_FUNCTION_TYPES;
         g_initialized = 1;
     }
     return &g_php_adapter;

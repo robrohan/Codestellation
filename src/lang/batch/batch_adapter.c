@@ -153,6 +153,9 @@ static char *batch_resolve_reference(const char *raw_text, const char *referenci
     return winscript_resolve(raw_text, referencing_file_path, symbol_table_handle);
 }
 
+/* Complexity stats (see adapter.h). */
+static const char *const BATCH_BRANCH_TYPES[] = { "if_stmt", "for_stmt", "&&", "||", NULL };
+
 static LanguageAdapter g_batch_adapter;
 static int g_initialized = 0;
 
@@ -167,6 +170,7 @@ const LanguageAdapter *batch_adapter_get(void) {
         g_batch_adapter.extract_declarations = batch_extract_declarations;
         g_batch_adapter.extract_references = batch_extract_references;
         g_batch_adapter.resolve_reference = batch_resolve_reference;
+        g_batch_adapter.branch_types = BATCH_BRANCH_TYPES;
         g_initialized = 1;
     }
     return &g_batch_adapter;

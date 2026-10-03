@@ -15,7 +15,8 @@
 		{"id":"ext-glfw","type":"text","text":"## GLFW / OpenGL\n*External system: windowing + GPU*\nGLFW fetched by CMake for window and input; OpenGL from the system framework on macOS, via vendored GLAD elsewhere.","x":425,"y":832,"width":314,"height":186},
 		{"id":"ext-obsidian","type":"text","text":"## Obsidian & JSON Canvas tools\n*External system*\nCan open the same `.canvas` files. Keys outside the JSON Canvas spec are dropped when Codestellation saves.","x":-932,"y":725,"width":300,"height":160},
 		{"id":"ext-reader","type":"text","text":"## Readers & LLMs\n*External system*\nConsume *Export Manual* / *Export LLM Brief* Markdown: every canvas, box, edge and code summary in one document.","x":830,"y":827,"width":317,"height":178},
-		{"id":"ext-claude","type":"text","text":"## Claude Code\n*External system*\nRuns the `codestellation-map` skill against a repo to produce a starter map.","x":-1335,"y":726,"width":300,"height":160}
+		{"id":"ext-claude","type":"text","text":"## Claude Code\n*External system*\nRuns the `codestellation-map` skill against a repo to produce a starter map.","x":-1335,"y":726,"width":300,"height":160},
+		{"id":"ext-git","type":"text","text":"## git\n*External system: command-line tool*\nRun during a graph build (`git log`) for per-file commit counts, authors and last-change dates, which feed the churn and hotspot stats. Skipped outside a repo, and on macOS without the developer tools.","x":1230,"y":827,"width":300,"height":200}
 	],
 	"edges":[
 		{"id":"e-person-dev-ctr-app","fromNode":"person-dev","fromSide":"bottom","toNode":"ctr-app","toSide":"top","label":"draws maps, explores code (mouse/keyboard)"},
@@ -29,6 +30,7 @@
 		{"id":"e-ext-claude-tool-skill","fromNode":"ext-claude","fromSide":"top","toNode":"tool-skill","toSide":"bottom","label":"runs skill"},
 		{"id":"e-tool-skill-store-project","fromNode":"tool-skill","fromSide":"top","toNode":"store-project","toSide":"top","label":"generates starter map"},
 		{"id":"e-tool-scripts-store-cache","fromNode":"tool-scripts","fromSide":"right","toNode":"store-cache","toSide":"bottom","label":"sanity_check.py reads graph.json"},
-		{"id":"e-tool-test-data-ctr-app","fromNode":"tool-test-data","fromSide":"top","toNode":"ctr-app","toSide":"bottom","label":"sample input per language"}
+		{"id":"e-tool-test-data-ctr-app","fromNode":"tool-test-data","fromSide":"top","toNode":"ctr-app","toSide":"bottom","label":"sample input per language"},
+		{"id":"e-ctr-app-ext-git","fromNode":"ctr-app","toNode":"ext-git","label":"git log (churn stats)","fromSide":"bottom","toSide":"top"}
 	]
 }

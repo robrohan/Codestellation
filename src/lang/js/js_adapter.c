@@ -490,6 +490,10 @@ static char *js_resolve_reference(const char *raw_text, const char *referencing_
 
 /* ---- adapters ---- */
 
+/* Complexity stats (see adapter.h); the same node names in all three grammars. */
+static const char *const JS_BRANCH_TYPES[] = { "if_statement", "for_statement", "for_in_statement", "while_statement", "do_statement", "switch_case", "catch_clause", "ternary_expression", "&&", "||", "??", NULL };
+static const char *const JS_FUNCTION_TYPES[] = { "function_declaration", "function_expression", "generator_function_declaration", "generator_function", "arrow_function", "method_definition", NULL };
+
 static LanguageAdapter g_js, g_ts, g_tsx;
 
 static const LanguageAdapter *init(LanguageAdapter *a, const char *name, const char **exts,
@@ -506,6 +510,8 @@ static const LanguageAdapter *init(LanguageAdapter *a, const char *name, const c
         a->extract_declarations = js_extract_declarations;
         a->extract_references = js_extract_references;
         a->resolve_reference = js_resolve_reference;
+        a->branch_types = JS_BRANCH_TYPES;
+        a->function_types = JS_FUNCTION_TYPES;
     }
     return a;
 }

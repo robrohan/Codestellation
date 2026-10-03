@@ -100,10 +100,12 @@ bool resolve_build_graph(const ParsedFileList *files, Graph *out_graph, int *out
                     }
                 } else {
                     unresolved++;
+                    out_graph->nodes[i].stats.unresolved++;
                 }
                 free(candidate);
             } else {
                 unresolved++;
+                out_graph->nodes[i].stats.unresolved++;
             }
         }
 

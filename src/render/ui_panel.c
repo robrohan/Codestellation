@@ -10,32 +10,24 @@
 #include "ui_panel.h"
 #include "note_compose.h"
 #include "fonts.h"
+#include "textarea.h"
 #include "../common/pathutil.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* Cache the last-loaded file so it isn't re-read from disk every frame. */
 static char *g_cached_path = NULL;
 static char *g_cached_content = NULL;
 
-/* The content viewer's last-known cursor position (a rune/codepoint
- * offset into g_cached_content, matching nk_edit's own indexing -- see
- * the NK_EDIT_ACTIVE capture in draw_single_mode), so "+ Add note" can
- * seed the line the user actually clicked on instead of always opening
- * blank. -1 means "unknown": nothing has been clicked in the viewer since
- * the last file load. Reset on every fresh load (below) so a stale
- * position from a previously-viewed file can't leak into a note on a
- * file the user hasn't clicked into yet. */
-static int g_content_cursor = -1;
-
-/* The preview's own edit state. nk_edit_string keeps a text box's scroll
- * position only while it has focus, so clicking "+ Add note" used to snap
- * the preview back to the top of the file -- losing exactly the context
- * the note is about. Owning the nk_text_edit (drawn with nk_edit_buffer)
- * keeps scroll and cursor across focus changes. Re-initialized whenever
+/* The file view: a read-only text area with line numbers and a marker on
+ * each line that has a note (textarea.h). It keeps its own scroll and
+ * cursor, so "+ Add note" seeds the line the user clicked, and switching
+ * focus to a button doesn't lose the place. Reloaded whenever
  * g_content_gen moves on (a different file loaded). */
-static struct nk_text_edit g_view;
+static TextArea g_view;
+static bool g_view_ready = false;
 static unsigned g_content_gen = 0;
 static unsigned g_view_gen = (unsigned)-1;
 
@@ -55,31 +47,14 @@ static void reset_delete_arm_if_context_changed(const char *context) {
     }
 }
 
-/* Nuklear's default font atlas is baked over the default glyph range,
- * which starts at space (0x20) -- a raw tab (0x09) has no glyph in it, so
- * the renderer falls back to a tofu/"?" placeholder for it. This is a
- * read-only preview, not a byte-exact editable buffer, so the simplest fix
- * is to expand tabs to spaces before display rather than teach the atlas
- * about control characters. Fixed-width (not column-aware tab stops) --
- * good enough for a preview, and avoids tracking column position across
- * embedded newlines. Caller frees. */
-static char *expand_tabs(const char *src) {
-    const int tab_width = 4;
+/* Old Mac files end lines with a lone '\r'; the text area only breaks on
+ * '\n' (and draws '\r' as nothing, so CRLF is fine as it is), so turn a
+ * lone '\r' into '\n' to keep those files' lines apart. Caller frees. */
+static char *normalize_line_endings(const char *src) {
     size_t len = strlen(src);
-    size_t extra = 0;
-    for (size_t i = 0; i < len; i++) {
-        if (src[i] == '\t') extra += (size_t)(tab_width - 1);
-    }
-    char *out = (char *)malloc(len + extra + 1);
-    size_t o = 0;
-    for (size_t i = 0; i < len; i++) {
-        if (src[i] == '\t') {
-            for (int s = 0; s < tab_width; s++) out[o++] = ' ';
-        } else {
-            out[o++] = src[i];
-        }
-    }
-    out[o] = '\0';
+    char *out = (char *)malloc(len + 1);
+    for (size_t i = 0; i < len; i++) out[i] = (src[i] == '\r' && src[i + 1] != '\n') ? '\n' : src[i];
+    out[len] = '\0';
     return out;
 }
 
@@ -90,7 +65,6 @@ static void load_file_if_needed(const char *path) {
     free(g_cached_content);
     g_cached_path = NULL;
     g_cached_content = NULL;
-    g_content_cursor = -1;
     g_content_gen++;
     if (!path) return;
 
@@ -113,7 +87,7 @@ static void load_file_if_needed(const char *path) {
     size_t got = fread(buf, 1, (size_t)size, f);
     buf[got] = '\0';
     fclose(f);
-    g_cached_content = expand_tabs(buf);
+    g_cached_content = normalize_line_endings(buf);
     free(buf);
 }
 
@@ -123,20 +97,6 @@ static void load_file_if_needed(const char *path) {
  * with multi-byte UTF-8 content (e.g. in a comment) before the cursor.
  * '\n' is always a lead byte on its own (ASCII), so it's unambiguous to
  * spot while walking. */
-static int line_number_for_rune_offset(const char *content, int rune_offset) {
-    if (!content || rune_offset <= 0) return 1;
-    int line = 1;
-    int runes_seen = 0;
-    for (const unsigned char *p = (const unsigned char *)content; *p; p++) {
-        if ((*p & 0xC0) != 0x80) { /* lead byte of a rune, not a UTF-8 continuation byte */
-            if (runes_seen >= rune_offset) break;
-            runes_seen++;
-        }
-        if (*p == '\n') line++;
-    }
-    return line;
-}
-
 /* One note's summary line + body preview + Edit/Delete. Edit opens the
  * separate Note compose pane directly (safe mid-list, it only copies the
  * note's fields into that pane's own state). Delete is deferred via
@@ -151,8 +111,11 @@ static void draw_note_row(struct nk_context *ctx, const Note *note, const Note *
     } else {
         nk_labelf(ctx, NK_TEXT_LEFT, "[%s] group, %zu files \xc2\xb7 %s", note->id, note->group_path_count, note->updated);
     }
-    nk_layout_row_dynamic(ctx, 32, 1);
-    nk_label_wrap(ctx, note->body);
+    /* The whole body, wrapped (a little narrower than the row, so the
+     * height is never short). */
+    float body_w = nk_window_get_content_region(ctx).w - 12.0f;
+    nk_layout_row_dynamic(ctx, textarea_label_height(ctx, note->body, body_w), 1);
+    textarea_label(ctx, note->body);
 
     nk_layout_row_dynamic(ctx, 20, 2);
     if (nk_button_label(ctx, "Edit")) note_compose_open_edit(note);
@@ -212,7 +175,142 @@ static void draw_group_mode(struct nk_context *ctx, const char **cluster_paths, 
     }
 }
 
-static void draw_single_mode(struct nk_context *ctx, float panel_h,
+/* ---- Stats section ------------------------------------------------- */
+
+#define STATS_ROW_H 16.0f
+#define STATS_MAX_CYCLE_NAMES 4
+
+static enum nk_collapse_states g_stats_state = NK_MAXIMIZED;
+
+static const char *base_name(const char *path) {
+    const char *slash = strrchr(path, '/');
+    const char *bslash = strrchr(path, '\\');
+    if (slash && (!bslash || slash > bslash)) return slash + 1;
+    return bslash ? bslash + 1 : path;
+}
+
+/* Other files in the selected file's cycle (up to `cap`), and how many
+ * there are in all. */
+static int cycle_mates(const Graph *g, int selected, const char **out, int cap) {
+    int id = g->nodes[selected].stats.cycle_id, n = 0;
+    if (id < 0) return 0;
+    for (size_t i = 0; i < g->node_count; i++) {
+        if ((int)i == selected || g->nodes[i].stats.cycle_id != id) continue;
+        if (n < cap) out[n] = base_name(g->nodes[i].path);
+        n++;
+    }
+    return n;
+}
+
+/* Rows the section will draw below its header -- so the file viewer under
+ * it can be given exactly the height that's left. */
+static int stats_row_count(const Graph *g, int selected) {
+    const NodeStats *st = &g->nodes[selected].stats;
+    if (!st->has_stats) return 2;
+    int rows = 11; /* lines, indent, complexity, in, out, blast, cycle, unresolved, parse errors, git, hotspot */
+    if (st->git_last_commit > 0) rows++;
+    if (st->cycle_size > 1) {
+        int mates = st->cycle_size - 1;
+        rows += mates > STATS_MAX_CYCLE_NAMES ? STATS_MAX_CYCLE_NAMES + 1 : mates;
+    }
+    return rows;
+}
+
+static void stat_row(struct nk_context *ctx, const char *label, const char *value) {
+    static const float ratio[] = { 0.38f, 0.62f };
+    nk_layout_row(ctx, NK_DYNAMIC, STATS_ROW_H, 2, ratio);
+    nk_label(ctx, label, NK_TEXT_LEFT);
+    nk_label(ctx, value, NK_TEXT_LEFT);
+}
+
+static const char *plural(int n, const char *one, const char *many) {
+    return n == 1 ? one : many;
+}
+
+static void draw_stats(struct nk_context *ctx, const Graph *g, int selected) {
+    const NodeStats *st = &g->nodes[selected].stats;
+    char v[160];
+    if (!st->has_stats) {
+        nk_layout_row_dynamic(ctx, STATS_ROW_H, 1);
+        nk_label(ctx, "This graph was built before stats existed.", NK_TEXT_LEFT);
+        nk_label(ctx, "Open the folder again to rebuild it.", NK_TEXT_LEFT);
+        return;
+    }
+
+    snprintf(v, sizeof(v), "%d (%d blank, %d with comments)", st->lines, st->blank_lines, st->comment_lines);
+    stat_row(ctx, "Lines", v);
+    snprintf(v, sizeof(v), "%d %s deep", st->max_indent, plural(st->max_indent, "level", "levels"));
+    stat_row(ctx, "Indentation", v);
+    if (st->complexity < 0) {
+        snprintf(v, sizeof(v), "n/a for %s", g->nodes[selected].language);
+    } else if (st->functions > 0 && st->hot_count > 0) {
+        snprintf(v, sizeof(v), "%d (%d %s, worst %d: %s, line %d)", st->complexity, st->functions,
+                 plural(st->functions, "function", "functions"), st->hot[0].complexity,
+                 st->hot[0].name[0] ? st->hot[0].name : "anonymous", st->hot[0].line);
+    } else if (st->functions > 0) {
+        snprintf(v, sizeof(v), "%d (%d %s, worst %d)", st->complexity, st->functions,
+                 plural(st->functions, "function", "functions"), st->max_function_complexity);
+    } else {
+        snprintf(v, sizeof(v), "%d", st->complexity);
+    }
+    stat_row(ctx, "Complexity", v);
+
+    snprintf(v, sizeof(v), "%d %s", st->fan_in, plural(st->fan_in, "file", "files"));
+    stat_row(ctx, "Depended on by", v);
+    snprintf(v, sizeof(v), "%d %s", st->fan_out, plural(st->fan_out, "file", "files"));
+    stat_row(ctx, "Depends on", v);
+    if (st->blast_radius < 0) snprintf(v, sizeof(v), "not computed (graph too large)");
+    else snprintf(v, sizeof(v), "%d %s, directly or not", st->blast_radius, plural(st->blast_radius, "file", "files"));
+    stat_row(ctx, "Blast radius", v);
+
+    if (st->cycle_size > 1) {
+        const char *names[STATS_MAX_CYCLE_NAMES];
+        int mates = cycle_mates(g, selected, names, STATS_MAX_CYCLE_NAMES);
+        snprintf(v, sizeof(v), "with %d other %s:", mates, plural(mates, "file", "files"));
+        stat_row(ctx, "In a cycle", v);
+        int shown = mates < STATS_MAX_CYCLE_NAMES ? mates : STATS_MAX_CYCLE_NAMES;
+        for (int i = 0; i < shown; i++) stat_row(ctx, "", names[i]);
+        if (mates > shown) {
+            snprintf(v, sizeof(v), "and %d more", mates - shown);
+            stat_row(ctx, "", v);
+        }
+    } else {
+        stat_row(ctx, "In a cycle", "no");
+    }
+
+    snprintf(v, sizeof(v), "%d", st->unresolved);
+    stat_row(ctx, "Unresolved refs", v);
+    if (st->parse_errors > 0) snprintf(v, sizeof(v), "%d (some links may be missing)", st->parse_errors);
+    else snprintf(v, sizeof(v), "0");
+    stat_row(ctx, "Parse errors", v);
+
+    if (st->git_commits < 0) {
+        snprintf(v, sizeof(v), "not in a git repo");
+    } else if (st->git_commits == 0) {
+        snprintf(v, sizeof(v), "never committed");
+    } else {
+        snprintf(v, sizeof(v), "%d %s by %d %s", st->git_commits, plural(st->git_commits, "commit", "commits"),
+                 st->git_authors, plural(st->git_authors, "author", "authors"));
+    }
+    stat_row(ctx, "Git history", v);
+    if (st->git_last_commit > 0) {
+        time_t t = (time_t)st->git_last_commit;
+        struct tm *tm = localtime(&t);
+        if (!tm || strftime(v, sizeof(v), "%Y-%m-%d", tm) == 0) snprintf(v, sizeof(v), "?");
+        stat_row(ctx, "Last commit", v);
+    }
+
+    if (st->hotspot_rank > 0) {
+        int ranked = 0;
+        for (size_t i = 0; i < g->node_count; i++) if (g->nodes[i].stats.hotspot_rank > 0) ranked++;
+        snprintf(v, sizeof(v), "#%d of %d (commits x complexity)", st->hotspot_rank, ranked);
+    } else {
+        snprintf(v, sizeof(v), "not ranked");
+    }
+    stat_row(ctx, "Hotspot", v);
+}
+
+static void draw_single_mode(struct nk_context *ctx, float panel_h, const Graph *graph, int selected,
                               const char *selected_path, const char *selected_language,
                               NoteSet *notes, const char *notes_md_path) {
     load_file_if_needed(selected_path);
@@ -229,8 +327,23 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h,
 
     nk_layout_row_dynamic(ctx, 20, 1);
     nk_label(ctx, selected_language ? selected_language : "", NK_TEXT_LEFT);
-    nk_layout_row_dynamic(ctx, 40, 1);
-    nk_label_wrap(ctx, selected_path);
+    float path_w = nk_window_get_content_region(ctx).w - 12.0f;
+    float path_h = textarea_label_height(ctx, selected_path, path_w);
+    nk_layout_row_dynamic(ctx, path_h, 1);
+    textarea_label(ctx, selected_path);
+
+    /* Stats, collapsible; its height comes out of the file viewer's. */
+    float stats_h = 0.0f;
+    bool have_node = graph && selected >= 0 && (size_t)selected < graph->node_count;
+    if (have_node) {
+        float pitch = STATS_ROW_H + ctx->style.window.spacing.y;
+        stats_h = 24.0f + ctx->style.window.spacing.y;
+        if (nk_tree_state_push(ctx, NK_TREE_TAB, "Stats", &g_stats_state)) {
+            draw_stats(ctx, graph, selected);
+            stats_h += pitch * (float)stats_row_count(graph, selected);
+            nk_tree_pop(ctx);
+        }
+    }
 
     /* Reserve fixed heights for everything below the content viewer
      * (notes label, notes list, the add-note button), same "whatever's
@@ -244,32 +357,51 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h,
      * completely ordinary-sized content (nothing actually needing to
      * scroll). Better to keep a bit of daylight than fight that again. */
     const float notes_label_h = 20.0f, notes_list_h = 150.0f, add_button_h = 30.0f;
-    const float reserved = 140.0f + notes_label_h + notes_list_h + add_button_h;
+    const float reserved = 100.0f + path_h + stats_h + notes_label_h + notes_list_h + add_button_h;
     float content_h = panel_h - reserved;
     if (content_h < 60.0f) content_h = 60.0f;
 
-    nk_layout_row_dynamic(ctx, content_h, 1);
+    if (!g_view_ready) {
+        textarea_init(&g_view, TEXTAREA_GUTTER | TEXTAREA_MONO);
+        g_view_ready = true;
+    }
     if (g_view_gen != g_content_gen) {
-        /* Read-only, so pointing the fixed buffer straight at the cached
-         * text (or a literal) is safe -- nothing ever writes through it. */
-        char *src = g_cached_content ? g_cached_content : (char *)"";
-        int len = (int)strlen(src);
-        nk_textedit_init_fixed(&g_view, src, (nk_size)len + 1);
-        g_view.single_line = 0; /* init_fixed defaults to single-line; up/down need multi */
-        g_view.string.buffer.allocated = (nk_size)len;
-        g_view.string.len = nk_utf_len(src, len);
+        textarea_set_text(&g_view, g_cached_content ? g_cached_content : "");
         g_view_gen = g_content_gen;
     }
-    nk_style_push_font(ctx, fonts_mono());
-    nk_flags edit_state = nk_edit_buffer(ctx, NK_EDIT_BOX | NK_EDIT_READ_ONLY, &g_view, nk_filter_default);
-    nk_style_pop_font(ctx);
-    /* NK_EDIT_ACTIVE: the preview has focus (was clicked into) this frame,
-     * so g_view.cursor is the line the user picked. Stashed separately so
-     * it survives the click on "+ Add note" that takes focus away. */
-    if (edit_state & NK_EDIT_ACTIVE) g_content_cursor = g_view.cursor;
 
     const Note *found[64];
     size_t found_n = notes_find_for_path(notes, selected_path, found, 64);
+
+    /* Gutter markers: a dot on every line with a note (id = index into
+     * found, clickable), and a ring around the start of each of the
+     * file's most complex functions (not clickable; tooltip says why). */
+    TextAreaMarker markers[64 + STATS_HOT_MAX];
+    static char hot_tips[STATS_HOT_MAX][96];
+    int marker_n = 0;
+    for (size_t i = 0; i < found_n; i++) {
+        if (found[i]->has_line) {
+            markers[marker_n++] = (TextAreaMarker){ found[i]->line, (int)i, TEXTAREA_MARKER_DOT, NULL };
+        }
+    }
+    if (graph && selected >= 0 && (size_t)selected < graph->node_count) {
+        const NodeStats *st = &graph->nodes[selected].stats;
+        for (int k = 0; k < st->hot_count; k++) {
+            snprintf(hot_tips[k], sizeof(hot_tips[k]), "%s: complexity %d",
+                     st->hot[k].name[0] ? st->hot[k].name : "anonymous function", st->hot[k].complexity);
+            markers[marker_n++] = (TextAreaMarker){ st->hot[k].line, -1, TEXTAREA_MARKER_RING, hot_tips[k] };
+        }
+    }
+
+    nk_layout_row_dynamic(ctx, content_h, 1);
+    TextAreaResult view;
+    textarea_draw(ctx, &g_view, markers, marker_n, &view);
+    if (view.marker_click_id >= 0) {
+        note_compose_open_edit(found[view.marker_click_id]);
+    } else if (view.gutter_click_line > 0) {
+        const char *p[1] = { selected_path };
+        note_compose_open_add(p, 1, true, view.gutter_click_line);
+    }
 
     nk_layout_row_dynamic(ctx, notes_label_h, 1);
     nk_labelf(ctx, NK_TEXT_LEFT, "Notes (%zu)", found_n);
@@ -288,13 +420,13 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h,
     nk_layout_row_dynamic(ctx, add_button_h, 1);
     if (nk_button_label(ctx, "+ Add note")) {
         const char *p[1] = { selected_path };
-        bool has_line = g_content_cursor >= 0;
-        int line = line_number_for_rune_offset(g_cached_content, g_content_cursor);
-        note_compose_open_add(p, 1, has_line, line);
+        int line = textarea_cursor_line(&g_view);
+        note_compose_open_add(p, 1, line > 0, line);
     }
 }
 
 void ui_panel_draw(struct nk_context *ctx, int window_width, int window_height,
+                    const Graph *graph, int selected,
                     const char *selected_path, const char *selected_language,
                     const char **cluster_paths, size_t cluster_count,
                     NoteSet *notes, const char *notes_md_path,
@@ -318,7 +450,7 @@ void ui_panel_draw(struct nk_context *ctx, int window_width, int window_height,
             draw_group_mode(ctx, cluster_paths, cluster_count, notes, notes_md_path);
         } else {
             struct nk_vec2 size = nk_window_get_size(ctx);
-            draw_single_mode(ctx, size.y, selected_path, selected_language, notes, notes_md_path);
+            draw_single_mode(ctx, size.y, graph, selected, selected_path, selected_language, notes, notes_md_path);
         }
     } else if (nk_window_is_collapsed(ctx, UI_PANEL_TITLE)) {
         /* nk_begin/nk_panel_begin returns false for a MINIMIZED window,
@@ -354,4 +486,6 @@ void ui_panel_shutdown(void) {
     free(g_cached_content);
     g_cached_path = NULL;
     g_cached_content = NULL;
+    if (g_view_ready) textarea_free(&g_view);
+    g_view_ready = false;
 }

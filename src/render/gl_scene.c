@@ -8,15 +8,17 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+/* a_size: point size in px, per node (nodestyle.h). */
 static const char *VERT_SRC =
     "#version 330 core\n"
     "layout(location = 0) in vec3 a_pos;\n"
     "layout(location = 1) in vec3 a_color;\n"
+    "layout(location = 2) in float a_size;\n"
     "uniform mat4 u_mvp;\n"
     "out vec3 v_color;\n"
     "void main() {\n"
     "    gl_Position = u_mvp * vec4(a_pos, 1.0);\n"
-    "    gl_PointSize = 9.0;\n"
+    "    gl_PointSize = a_size;\n"
     "    v_color = a_color;\n"
     "}\n";
 
@@ -76,6 +78,7 @@ void gl_scene_init(GLScene *scene) {
     glGenVertexArrays(1, &scene->vao);
     glGenBuffers(1, &scene->vbo);
     glGenBuffers(1, &scene->color_vbo);
+    glGenBuffers(1, &scene->size_vbo);
     glGenBuffers(1, &scene->ebo);
     glGenBuffers(1, &scene->highlight_ebo);
     glGenBuffers(1, &scene->cluster_ebo);
@@ -91,6 +94,10 @@ void gl_scene_init(GLScene *scene) {
     glBindBuffer(GL_ARRAY_BUFFER, scene->color_vbo);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
     glEnableVertexAttribArray(1);
+    /* Point size per node, static like the colours (nodestyle.h). */
+    glBindBuffer(GL_ARRAY_BUFFER, scene->size_vbo);
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(float), (void *)0);
+    glEnableVertexAttribArray(2);
     /* The element-buffer binding is part of VAO state (unlike GL_ARRAY_BUFFER),
      * so it has to be bound here, while this VAO is current -- binding it later
      * in gl_scene_upload (with no VAO bound) would attach it to VAO 0 instead,
@@ -118,8 +125,8 @@ void gl_scene_init(GLScene *scene) {
     glBindVertexArray(0);
 }
 
-void gl_scene_upload(GLScene *scene, const float *positions, const float *colors, size_t point_count,
-                      const unsigned int *edge_indices, size_t edge_count) {
+void gl_scene_upload(GLScene *scene, const float *positions, const float *colors, const float *sizes,
+                      size_t point_count, const unsigned int *edge_indices, size_t edge_count) {
     scene->point_count = (GLsizei)point_count;
     scene->edge_index_count = (GLsizei)(edge_count * 2);
 
@@ -128,6 +135,8 @@ void gl_scene_upload(GLScene *scene, const float *positions, const float *colors
 
     glBindBuffer(GL_ARRAY_BUFFER, scene->color_vbo);
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(point_count * 3 * sizeof(float)), colors, GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, scene->size_vbo);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(point_count * sizeof(float)), sizes, GL_STATIC_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, scene->ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(edge_count * 2 * sizeof(unsigned int)), edge_indices, GL_STATIC_DRAW);
@@ -230,6 +239,7 @@ void gl_scene_destroy(GLScene *scene) {
     glDeleteProgram(scene->prog);
     glDeleteBuffers(1, &scene->vbo);
     glDeleteBuffers(1, &scene->color_vbo);
+    glDeleteBuffers(1, &scene->size_vbo);
     glDeleteBuffers(1, &scene->ebo);
     glDeleteBuffers(1, &scene->highlight_ebo);
     glDeleteBuffers(1, &scene->cluster_ebo);

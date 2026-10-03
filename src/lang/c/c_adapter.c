@@ -87,6 +87,10 @@ static char *c_resolve_reference(const char *raw_text,
     return normalized; /* NULL if the included file doesn't exist on disk */
 }
 
+/* Complexity stats (see adapter.h). */
+static const char *const C_BRANCH_TYPES[] = { "if_statement", "for_statement", "while_statement", "do_statement", "case_statement", "conditional_expression", "&&", "||", NULL };
+static const char *const C_FUNCTION_TYPES[] = { "function_definition", NULL };
+
 static LanguageAdapter g_c_adapter;
 static TSQuery *g_ref_query = NULL;
 
@@ -112,6 +116,8 @@ const LanguageAdapter *c_adapter_get(void) {
         g_c_adapter.extract_declarations = c_extract_declarations;
         g_c_adapter.extract_references = c_extract_references;
         g_c_adapter.resolve_reference = c_resolve_reference;
+        g_c_adapter.branch_types = C_BRANCH_TYPES;
+        g_c_adapter.function_types = C_FUNCTION_TYPES;
     }
     return &g_c_adapter;
 }
