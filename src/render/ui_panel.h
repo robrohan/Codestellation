@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include "panel_rect.h"
 #include "../notes/notes.h"
+#include "../graph/graph.h"
 
 /* Forward-declared rather than including nuklear.h here: Nuklear's
  * NK_INCLUDE_* feature macros affect struct layout, so every TU that
@@ -25,7 +26,10 @@ struct nk_context;
  * Single-selection mode (cluster_count <= 1): selected node's path and
  * language (if any), a read-only scrollable view of that file's actual
  * text, a Notes list for it, and an "+ Add note" button (opens the
- * separate Note compose pane, see note_compose.h).
+ * separate Note compose pane, see note_compose.h). Above the text, a
+ * collapsible Stats section shows graph->nodes[selected].stats (see
+ * graph.h); `graph` is also scanned for the other files in its cycle and
+ * for the hotspot ranking's size.
  *
  * Group mode (cluster_count > 1): cluster_paths/cluster_count instead
  * describe a multi-file selection; the panel shows that path list and a
@@ -37,6 +41,7 @@ struct nk_context;
  * is where those saves go. *out_bounds receives this frame's live window
  * rect (for main.c/labels.c to avoid drawing under it). */
 void ui_panel_draw(struct nk_context *ctx, int window_width, int window_height,
+                    const Graph *graph, int selected,
                     const char *selected_path, const char *selected_language,
                     const char **cluster_paths, size_t cluster_count,
                     NoteSet *notes, const char *notes_md_path,

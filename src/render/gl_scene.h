@@ -5,7 +5,7 @@
 #include <stddef.h>
 
 typedef struct {
-    GLuint vao, vbo, color_vbo, ebo;
+    GLuint vao, vbo, color_vbo, size_vbo, ebo;
     GLuint prog;
     GLint u_mvp, u_color, u_override;
     GLsizei edge_index_count;
@@ -23,9 +23,11 @@ void gl_scene_init(GLScene *scene);
  * index). colors: point_count * 3 floats (r,g,b per node, same order --
  * static per node, e.g. dircolor_compute's output; never touched by
  * dragging so there's no update path for it, unlike positions).
+ * sizes: point_count floats (point size in px, see nodestyle.h), static
+ * per node like colors.
  * edge_indices: edge_count * 2 uints (source, target per edge). */
-void gl_scene_upload(GLScene *scene, const float *positions, const float *colors, size_t point_count,
-                      const unsigned int *edge_indices, size_t edge_count);
+void gl_scene_upload(GLScene *scene, const float *positions, const float *colors, const float *sizes,
+                      size_t point_count, const unsigned int *edge_indices, size_t edge_count);
 
 /* Cheap re-upload of just the vertex buffer -- used after a drag moves a
  * node. Point/edge counts must match what gl_scene_upload was last

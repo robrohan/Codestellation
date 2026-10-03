@@ -265,6 +265,10 @@ static char *vbnet_resolve_reference(const char *raw_text,
     return NULL;
 }
 
+/* Complexity stats (see adapter.h). */
+static const char *const VBNET_BRANCH_TYPES[] = { "if_statement", "elseif_clause", "for_statement", "for_each_statement", "while_statement", "do_statement", "case_block", "catch_block", "ternary_expression", NULL };
+static const char *const VBNET_FUNCTION_TYPES[] = { "method_declaration", "constructor_declaration", "lambda_expression", NULL };
+
 static LanguageAdapter g_vbnet_adapter;
 static int g_initialized = 0;
 
@@ -279,6 +283,8 @@ const LanguageAdapter *vbnet_adapter_get(void) {
         g_vbnet_adapter.extract_declarations = vbnet_extract_declarations;
         g_vbnet_adapter.extract_references = vbnet_extract_references;
         g_vbnet_adapter.resolve_reference = vbnet_resolve_reference;
+        g_vbnet_adapter.branch_types = VBNET_BRANCH_TYPES;
+        g_vbnet_adapter.function_types = VBNET_FUNCTION_TYPES;
         g_initialized = 1;
     }
     return &g_vbnet_adapter;

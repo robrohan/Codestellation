@@ -275,6 +275,10 @@ static char *csharp_resolve_reference(const char *raw_text,
     return NULL;
 }
 
+/* Complexity stats (see adapter.h). */
+static const char *const CSHARP_BRANCH_TYPES[] = { "if_statement", "for_statement", "foreach_statement", "while_statement", "do_statement", "switch_section", "switch_expression_arm", "catch_clause", "conditional_expression", "&&", "||", "??", NULL };
+static const char *const CSHARP_FUNCTION_TYPES[] = { "method_declaration", "constructor_declaration", "destructor_declaration", "operator_declaration", "accessor_declaration", "local_function_statement", "lambda_expression", "anonymous_method_expression", NULL };
+
 static LanguageAdapter g_csharp_adapter;
 static int g_initialized = 0;
 
@@ -289,6 +293,8 @@ const LanguageAdapter *csharp_adapter_get(void) {
         g_csharp_adapter.extract_declarations = csharp_extract_declarations;
         g_csharp_adapter.extract_references = csharp_extract_references;
         g_csharp_adapter.resolve_reference = csharp_resolve_reference;
+        g_csharp_adapter.branch_types = CSHARP_BRANCH_TYPES;
+        g_csharp_adapter.function_types = CSHARP_FUNCTION_TYPES;
         g_initialized = 1;
     }
     return &g_csharp_adapter;

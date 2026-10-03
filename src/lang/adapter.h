@@ -55,6 +55,16 @@ typedef struct LanguageAdapter {
                                 const char **imported_namespaces,
                                 int imported_count,
                                 void *symbol_table_handle);
+
+    /* For complexity stats (pipeline/filestats.c), NULL-terminated lists
+     * of syntax node types -- named ("if_statement") or anonymous ("&&").
+     * branch_types: each occurrence is one decision point; a branch whose
+     * first token is "default" (a switch's default label) doesn't count.
+     * function_types: nodes that start a function, for per-function
+     * numbers. NULL (the default) means "not applicable": data and markup
+     * languages, and grammars too loose to tell (Lisp, SQL). */
+    const char *const *branch_types;
+    const char *const *function_types;
 } LanguageAdapter;
 
 #endif

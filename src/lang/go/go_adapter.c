@@ -168,6 +168,10 @@ static char *go_resolve_reference(const char *raw_text,
     return NULL;
 }
 
+/* Complexity stats (see adapter.h). */
+static const char *const GO_BRANCH_TYPES[] = { "if_statement", "for_statement", "expression_case", "type_case", "communication_case", "&&", "||", NULL };
+static const char *const GO_FUNCTION_TYPES[] = { "function_declaration", "method_declaration", "func_literal", NULL };
+
 static LanguageAdapter g_go_adapter;
 static TSQuery *g_ref_query = NULL;
 
@@ -193,6 +197,8 @@ const LanguageAdapter *go_adapter_get(void) {
         g_go_adapter.extract_declarations = go_extract_declarations;
         g_go_adapter.extract_references = go_extract_references;
         g_go_adapter.resolve_reference = go_resolve_reference;
+        g_go_adapter.branch_types = GO_BRANCH_TYPES;
+        g_go_adapter.function_types = GO_FUNCTION_TYPES;
     }
     return &g_go_adapter;
 }
