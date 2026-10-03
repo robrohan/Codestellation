@@ -10,6 +10,7 @@
 #include "ui_panel.h"
 #include "note_compose.h"
 #include "fonts.h"
+#include "textarea.h"
 #include "../common/pathutil.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,23 +21,13 @@
 static char *g_cached_path = NULL;
 static char *g_cached_content = NULL;
 
-/* The content viewer's last-known cursor position (a rune/codepoint
- * offset into g_cached_content, matching nk_edit's own indexing -- see
- * the NK_EDIT_ACTIVE capture in draw_single_mode), so "+ Add note" can
- * seed the line the user actually clicked on instead of always opening
- * blank. -1 means "unknown": nothing has been clicked in the viewer since
- * the last file load. Reset on every fresh load (below) so a stale
- * position from a previously-viewed file can't leak into a note on a
- * file the user hasn't clicked into yet. */
-static int g_content_cursor = -1;
-
-/* The preview's own edit state. nk_edit_string keeps a text box's scroll
- * position only while it has focus, so clicking "+ Add note" used to snap
- * the preview back to the top of the file -- losing exactly the context
- * the note is about. Owning the nk_text_edit (drawn with nk_edit_buffer)
- * keeps scroll and cursor across focus changes. Re-initialized whenever
+/* The file view: a read-only text area with line numbers and a marker on
+ * each line that has a note (textarea.h). It keeps its own scroll and
+ * cursor, so "+ Add note" seeds the line the user clicked, and switching
+ * focus to a button doesn't lose the place. Reloaded whenever
  * g_content_gen moves on (a different file loaded). */
-static struct nk_text_edit g_view;
+static TextArea g_view;
+static bool g_view_ready = false;
 static unsigned g_content_gen = 0;
 static unsigned g_view_gen = (unsigned)-1;
 
@@ -56,39 +47,14 @@ static void reset_delete_arm_if_context_changed(const char *context) {
     }
 }
 
-/* Nuklear's default font atlas is baked over the default glyph range,
- * which starts at space (0x20) -- a raw tab (0x09) has no glyph in it, so
- * the renderer falls back to a tofu/"?" placeholder for it. This is a
- * read-only preview, not a byte-exact editable buffer, so the simplest fix
- * is to expand tabs to spaces before display rather than teach the atlas
- * about control characters. Fixed-width (not column-aware tab stops) --
- * good enough for a preview, and avoids tracking column position across
- * embedded newlines.
- *
- * Carriage returns have the same problem: a Windows (CRLF) file showed a
- * "?" at the end of every line. "\r\n" becomes "\n", and a lone "\r" (old
- * Mac line endings) becomes "\n" too, so line numbers -- which notes are
- * anchored to, counted on this same buffer -- still match the file's lines.
- * Caller frees. */
-static char *clean_for_display(const char *src) {
-    const int tab_width = 4;
+/* Old Mac files end lines with a lone '\r'; the text area only breaks on
+ * '\n' (and draws '\r' as nothing, so CRLF is fine as it is), so turn a
+ * lone '\r' into '\n' to keep those files' lines apart. Caller frees. */
+static char *normalize_line_endings(const char *src) {
     size_t len = strlen(src);
-    size_t extra = 0;
-    for (size_t i = 0; i < len; i++) {
-        if (src[i] == '\t') extra += (size_t)(tab_width - 1);
-    }
-    char *out = (char *)malloc(len + extra + 1);
-    size_t o = 0;
-    for (size_t i = 0; i < len; i++) {
-        if (src[i] == '\t') {
-            for (int s = 0; s < tab_width; s++) out[o++] = ' ';
-        } else if (src[i] == '\r') {
-            if (src[i + 1] != '\n') out[o++] = '\n';
-        } else {
-            out[o++] = src[i];
-        }
-    }
-    out[o] = '\0';
+    char *out = (char *)malloc(len + 1);
+    for (size_t i = 0; i < len; i++) out[i] = (src[i] == '\r' && src[i + 1] != '\n') ? '\n' : src[i];
+    out[len] = '\0';
     return out;
 }
 
@@ -99,7 +65,6 @@ static void load_file_if_needed(const char *path) {
     free(g_cached_content);
     g_cached_path = NULL;
     g_cached_content = NULL;
-    g_content_cursor = -1;
     g_content_gen++;
     if (!path) return;
 
@@ -122,7 +87,7 @@ static void load_file_if_needed(const char *path) {
     size_t got = fread(buf, 1, (size_t)size, f);
     buf[got] = '\0';
     fclose(f);
-    g_cached_content = clean_for_display(buf);
+    g_cached_content = normalize_line_endings(buf);
     free(buf);
 }
 
@@ -132,20 +97,6 @@ static void load_file_if_needed(const char *path) {
  * with multi-byte UTF-8 content (e.g. in a comment) before the cursor.
  * '\n' is always a lead byte on its own (ASCII), so it's unambiguous to
  * spot while walking. */
-static int line_number_for_rune_offset(const char *content, int rune_offset) {
-    if (!content || rune_offset <= 0) return 1;
-    int line = 1;
-    int runes_seen = 0;
-    for (const unsigned char *p = (const unsigned char *)content; *p; p++) {
-        if ((*p & 0xC0) != 0x80) { /* lead byte of a rune, not a UTF-8 continuation byte */
-            if (runes_seen >= rune_offset) break;
-            runes_seen++;
-        }
-        if (*p == '\n') line++;
-    }
-    return line;
-}
-
 /* One note's summary line + body preview + Edit/Delete. Edit opens the
  * separate Note compose pane directly (safe mid-list, it only copies the
  * note's fields into that pane's own state). Delete is deferred via
@@ -160,8 +111,11 @@ static void draw_note_row(struct nk_context *ctx, const Note *note, const Note *
     } else {
         nk_labelf(ctx, NK_TEXT_LEFT, "[%s] group, %zu files \xc2\xb7 %s", note->id, note->group_path_count, note->updated);
     }
-    nk_layout_row_dynamic(ctx, 32, 1);
-    nk_label_wrap(ctx, note->body);
+    /* The whole body, wrapped (a little narrower than the row, so the
+     * height is never short). */
+    float body_w = nk_window_get_content_region(ctx).w - 12.0f;
+    nk_layout_row_dynamic(ctx, textarea_label_height(ctx, note->body, body_w), 1);
+    textarea_label(ctx, note->body);
 
     nk_layout_row_dynamic(ctx, 20, 2);
     if (nk_button_label(ctx, "Edit")) note_compose_open_edit(note);
@@ -369,8 +323,10 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h, const Graph 
 
     nk_layout_row_dynamic(ctx, 20, 1);
     nk_label(ctx, selected_language ? selected_language : "", NK_TEXT_LEFT);
-    nk_layout_row_dynamic(ctx, 40, 1);
-    nk_label_wrap(ctx, selected_path);
+    float path_w = nk_window_get_content_region(ctx).w - 12.0f;
+    float path_h = textarea_label_height(ctx, selected_path, path_w);
+    nk_layout_row_dynamic(ctx, path_h, 1);
+    textarea_label(ctx, selected_path);
 
     /* Stats, collapsible; its height comes out of the file viewer's. */
     float stats_h = 0.0f;
@@ -397,32 +353,42 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h, const Graph 
      * completely ordinary-sized content (nothing actually needing to
      * scroll). Better to keep a bit of daylight than fight that again. */
     const float notes_label_h = 20.0f, notes_list_h = 150.0f, add_button_h = 30.0f;
-    const float reserved = 140.0f + stats_h + notes_label_h + notes_list_h + add_button_h;
+    const float reserved = 100.0f + path_h + stats_h + notes_label_h + notes_list_h + add_button_h;
     float content_h = panel_h - reserved;
     if (content_h < 60.0f) content_h = 60.0f;
 
-    nk_layout_row_dynamic(ctx, content_h, 1);
+    if (!g_view_ready) {
+        textarea_init(&g_view, TEXTAREA_GUTTER | TEXTAREA_MONO);
+        g_view_ready = true;
+    }
     if (g_view_gen != g_content_gen) {
-        /* Read-only, so pointing the fixed buffer straight at the cached
-         * text (or a literal) is safe -- nothing ever writes through it. */
-        char *src = g_cached_content ? g_cached_content : (char *)"";
-        int len = (int)strlen(src);
-        nk_textedit_init_fixed(&g_view, src, (nk_size)len + 1);
-        g_view.single_line = 0; /* init_fixed defaults to single-line; up/down need multi */
-        g_view.string.buffer.allocated = (nk_size)len;
-        g_view.string.len = nk_utf_len(src, len);
+        textarea_set_text(&g_view, g_cached_content ? g_cached_content : "");
         g_view_gen = g_content_gen;
     }
-    nk_style_push_font(ctx, fonts_mono());
-    nk_flags edit_state = nk_edit_buffer(ctx, NK_EDIT_BOX | NK_EDIT_READ_ONLY, &g_view, nk_filter_default);
-    nk_style_pop_font(ctx);
-    /* NK_EDIT_ACTIVE: the preview has focus (was clicked into) this frame,
-     * so g_view.cursor is the line the user picked. Stashed separately so
-     * it survives the click on "+ Add note" that takes focus away. */
-    if (edit_state & NK_EDIT_ACTIVE) g_content_cursor = g_view.cursor;
 
     const Note *found[64];
     size_t found_n = notes_find_for_path(notes, selected_path, found, 64);
+
+    /* A gutter marker on every line with a note; its id is the index into found. */
+    TextAreaMarker markers[64];
+    int marker_n = 0;
+    for (size_t i = 0; i < found_n; i++) {
+        if (found[i]->has_line) {
+            markers[marker_n].line = found[i]->line;
+            markers[marker_n].id = (int)i;
+            marker_n++;
+        }
+    }
+
+    nk_layout_row_dynamic(ctx, content_h, 1);
+    TextAreaResult view;
+    textarea_draw(ctx, &g_view, markers, marker_n, &view);
+    if (view.marker_click_id >= 0) {
+        note_compose_open_edit(found[view.marker_click_id]);
+    } else if (view.gutter_click_line > 0) {
+        const char *p[1] = { selected_path };
+        note_compose_open_add(p, 1, true, view.gutter_click_line);
+    }
 
     nk_layout_row_dynamic(ctx, notes_label_h, 1);
     nk_labelf(ctx, NK_TEXT_LEFT, "Notes (%zu)", found_n);
@@ -441,9 +407,8 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h, const Graph 
     nk_layout_row_dynamic(ctx, add_button_h, 1);
     if (nk_button_label(ctx, "+ Add note")) {
         const char *p[1] = { selected_path };
-        bool has_line = g_content_cursor >= 0;
-        int line = line_number_for_rune_offset(g_cached_content, g_content_cursor);
-        note_compose_open_add(p, 1, has_line, line);
+        int line = textarea_cursor_line(&g_view);
+        note_compose_open_add(p, 1, line > 0, line);
     }
 }
 
@@ -508,4 +473,6 @@ void ui_panel_shutdown(void) {
     free(g_cached_content);
     g_cached_path = NULL;
     g_cached_content = NULL;
+    if (g_view_ready) textarea_free(&g_view);
+    g_view_ready = false;
 }

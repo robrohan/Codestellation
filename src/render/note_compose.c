@@ -8,6 +8,7 @@
 #include "nuklear.h"
 
 #include "note_compose.h"
+#include "textarea.h"
 #include "../common/pathutil.h"
 #include "../notes/filehash.h"
 #include <stdlib.h>
@@ -16,7 +17,16 @@
 #define MAX_TARGET_PATHS 64
 
 static bool g_open = false;
-static char g_body[4096] = "";
+/* The note body: an editable, wrapping text area (textarea.h). */
+static TextArea g_body;
+static bool g_body_ready = false;
+
+static void ensure_body(void) {
+    if (!g_body_ready) {
+        textarea_init(&g_body, TEXTAREA_EDITABLE);
+        g_body_ready = true;
+    }
+}
 static nk_bool g_has_line = nk_false;
 static int g_line = 1;
 static bool g_editing = false;
@@ -36,7 +46,9 @@ static void free_targets(void) {
 
 static void reset(void) {
     g_open = false;
-    g_body[0] = '\0';
+    ensure_body();
+    textarea_set_text(&g_body, "");
+    textarea_blur(&g_body);
     g_has_line = nk_false;
     g_line = 1;
     g_editing = false;
@@ -52,12 +64,13 @@ void note_compose_open_add(const char **paths, size_t path_count, bool has_line,
     g_has_line = has_line ? nk_true : nk_false;
     g_line = line > 0 ? line : 1;
     g_open = true;
+    textarea_focus(&g_body);
 }
 
 void note_compose_open_edit(const Note *note) {
     reset();
-    strncpy(g_body, note->body ? note->body : "", sizeof(g_body) - 1);
-    g_body[sizeof(g_body) - 1] = '\0';
+    textarea_set_text(&g_body, note->body ? note->body : "");
+    textarea_focus(&g_body);
     g_has_line = note->has_line ? nk_true : nk_false;
     g_line = note->has_line ? note->line : 1;
     g_editing = true;
@@ -79,44 +92,6 @@ void note_compose_open_edit(const Note *note) {
 bool note_compose_is_open(void) { return g_open; }
 
 void note_compose_close(void) { reset(); }
-
-/* No word-wrap exists anywhere in Nuklear's edit widget (confirmed by
- * reading its row-layout code directly -- it only ever breaks a row on a
- * literal '\n'). Rather than patching nuklear.h a fourth time to add a
- * true reflowing soft-wrap (the approach an upstream PR attempted and
- * never got working cleanly), this hard-wraps as you type: once per
- * frame, on the *settled* buffer from the previous frame (never
- * mid-keystroke), swap the last space before an overflowing line for a
- * real newline. Same-length substitution + strictly between-frames means
- * it can't desync nuklear's own internal cursor/selection byte offsets --
- * the same "safe to swap content between frames" pattern ui_panel.c
- * already relies on when reloading file content on selection change.
- *
- * Trade-off, deliberate: this writes real newlines into the saved body,
- * so resizing the pane after text is already wrapped won't retroactively
- * reflow it (like a manually-wrapped plain-text email). A single token
- * wider than the pane (a long URL) is left alone rather than force-broken
- * mid-word -- it just overflows, no worse than before this existed. */
-static void hard_wrap(const struct nk_user_font *font, char *body, float avail_width) {
-    if (!font || avail_width <= 0.0f) return;
-    size_t len = strlen(body);
-    size_t line_start = 0;
-    size_t last_space = (size_t)-1;
-    for (size_t i = 0; i <= len; i++) {
-        if (i == len || body[i] == '\n') {
-            line_start = i + 1;
-            last_space = (size_t)-1;
-            continue;
-        }
-        if (body[i] == ' ') last_space = i;
-        float w = font->width(font->userdata, font->height, body + line_start, (int)(i - line_start + 1));
-        if (w > avail_width && last_space != (size_t)-1 && last_space > line_start) {
-            body[last_space] = '\n';
-            line_start = last_space + 1;
-            last_space = (size_t)-1;
-        }
-    }
-}
 
 void note_compose_draw(struct nk_context *ctx, NoteSet *notes, const char *notes_md_path,
                         PanelRect *out_bounds) {
@@ -141,8 +116,6 @@ void note_compose_draw(struct nk_context *ctx, NoteSet *notes, const char *notes
             nk_labelf(ctx, NK_TEXT_LEFT, "Group note \xc2\xb7 %zu files", g_target_count);
         }
 
-        hard_wrap(ctx->style.font, g_body, size.x - 24.0f);
-
         /* 200 (not the raw ~90 the label/checkbox/button rows above and
          * below sum to) is deliberate slack for nuklear's own per-frame
          * chrome: header height, the footer strip NK_WINDOW_SCALABLE
@@ -160,7 +133,7 @@ void note_compose_draw(struct nk_context *ctx, NoteSet *notes, const char *notes
         float body_h = size.y - 200.0f;
         if (body_h < 60.0f) body_h = 60.0f;
         nk_layout_row_dynamic(ctx, body_h, 1);
-        nk_edit_string_zero_terminated(ctx, NK_EDIT_BOX, g_body, sizeof(g_body), nk_filter_default);
+        textarea_draw(ctx, &g_body, NULL, 0, NULL);
 
         nk_layout_row_dynamic(ctx, 26, 2);
         bool save_clicked = nk_button_label(ctx, "Save");
@@ -168,15 +141,15 @@ void note_compose_draw(struct nk_context *ctx, NoteSet *notes, const char *notes
 
         if (save_clicked) {
             if (g_editing) {
-                notes_update_note(notes_md_path, notes, g_editing_id, g_has_line, g_line, g_body);
+                notes_update_note(notes_md_path, notes, g_editing_id, g_has_line, g_line, textarea_text(&g_body));
             } else if (single) {
                 uint64_t h;
                 bool has_hash = file_content_hash(g_target_paths[0], &h);
                 notes_append_file_note(notes_md_path, notes, g_target_paths[0], has_hash, h,
-                                        g_has_line, g_line, g_body);
+                                        g_has_line, g_line, textarea_text(&g_body));
             } else if (g_target_count > 1) {
                 notes_append_group_note(notes_md_path, notes, (const char **)g_target_paths,
-                                         g_target_count, g_body);
+                                         g_target_count, textarea_text(&g_body));
             }
             reset();
         } else if (cancel_clicked) {

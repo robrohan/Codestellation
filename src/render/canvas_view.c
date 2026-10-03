@@ -9,6 +9,7 @@
 
 #include "canvas_view.h"
 #include "md_render.h"
+#include "textarea.h"
 #include "fonts.h"
 #include "theme.h"
 #include "../canvas/canvas_doc.h"
@@ -92,7 +93,18 @@ static double g_now = 0.0;
 static bool g_editor_open = false;
 static bool g_edit_focus_pending = false;
 static bool g_edit_active = false;
-static char g_edit_buf[EDIT_BUF_SIZE];
+static char g_edit_buf[EDIT_BUF_SIZE];     /* single-line fields: labels, paths, URLs */
+static TextArea g_edit_md;                 /* a text box's markdown: wrapped, editable */
+static bool g_edit_md_ready = false;
+
+/* The editor's markdown area, created on first use. */
+static TextArea *edit_md(void) {
+    if (!g_edit_md_ready) {
+        textarea_init(&g_edit_md, TEXTAREA_EDITABLE);
+        g_edit_md_ready = true;
+    }
+    return &g_edit_md;
+}
 
 /* Actions requested from the editor/breadcrumb widgets during draw, run at
  * the start of the next update so the doc never changes mid-draw. */
@@ -894,6 +906,8 @@ static void open_editor(bool focus) {
     const char *src = *s ? *s : "";
     strncpy(g_edit_buf, src, sizeof(g_edit_buf) - 1);
     g_edit_buf[sizeof(g_edit_buf) - 1] = '\0';
+    textarea_set_text(edit_md(), src);
+    if (!focus) textarea_blur(edit_md());
     g_editor_open = true;
     g_edit_focus_pending = focus;
 }
@@ -1516,6 +1530,7 @@ static void draw_editor(struct nk_context *ctx, int width, int height, PanelRect
     if (!g_editor_open || !target) {
         g_editor_open = false;
         g_edit_active = false;
+        if (g_edit_md_ready) textarea_blur(&g_edit_md);
         *out = (PanelRect){ 0, 0, 0, 0 };
         return;
     }
@@ -1554,26 +1569,45 @@ static void draw_editor(struct nk_context *ctx, int width, int height, PanelRect
         nk_layout_row_dynamic(ctx, 20, 1);
         nk_label(ctx, what, NK_TEXT_LEFT);
 
-        /* Longer than the buffer: show it, but don't let the edit
-         * silently truncate the real text. */
-        bool too_long = *target && strlen(*target) >= sizeof(g_edit_buf) - 1;
-        nk_flags flags = (too_long ? NK_EDIT_READ_ONLY : 0);
         bool multiline = !is_edge && node->type == CNODE_TEXT;
+        /* Single-line fields: longer than the buffer means show it, but
+         * don't let the edit silently truncate the real text. */
+        bool too_long = !multiline && *target && strlen(*target) >= sizeof(g_edit_buf) - 1;
         struct nk_rect content = nk_window_get_content_region(ctx);
         float edit_h = multiline ? fmaxf(content.h - 130.0f, 120.0f) : 30.0f;
         nk_layout_row_dynamic(ctx, edit_h, 1);
-        if (g_edit_focus_pending) {
-            nk_edit_focus(ctx, 0);
-            g_edit_focus_pending = false;
-        }
-        nk_flags state = nk_edit_string_zero_terminated(ctx, flags | (multiline ? NK_EDIT_BOX : NK_EDIT_FIELD),
-                                                        g_edit_buf, (int)sizeof(g_edit_buf), nk_filter_default);
-        g_edit_active = (state & NK_EDIT_ACTIVE) != 0;
-        if (!too_long && strcmp(g_edit_buf, *target ? *target : "") != 0) {
-            free(*target);
-            /* An emptied edge/group label is removed rather than kept as "". */
-            *target = (g_edit_buf[0] || multiline) ? xstrdup(g_edit_buf) : NULL;
-            mark_dirty();
+        if (multiline) {
+            TextArea *md = edit_md();
+            /* Changed from elsewhere while not being typed in: follow it. */
+            if (!md->focused && strcmp(textarea_text(md), *target ? *target : "") != 0) {
+                textarea_set_text(md, *target ? *target : "");
+            }
+            if (g_edit_focus_pending) {
+                textarea_focus(md);
+                g_edit_focus_pending = false;
+            }
+            TextAreaResult res;
+            textarea_draw(ctx, md, NULL, 0, &res);
+            g_edit_active = res.focused;
+            if (res.changed && strcmp(textarea_text(md), *target ? *target : "") != 0) {
+                free(*target);
+                *target = xstrdup(textarea_text(md));
+                mark_dirty();
+            }
+        } else {
+            if (g_edit_focus_pending) {
+                nk_edit_focus(ctx, 0);
+                g_edit_focus_pending = false;
+            }
+            nk_flags state = nk_edit_string_zero_terminated(ctx, (too_long ? NK_EDIT_READ_ONLY : 0) | NK_EDIT_FIELD,
+                                                            g_edit_buf, (int)sizeof(g_edit_buf), nk_filter_default);
+            g_edit_active = (state & NK_EDIT_ACTIVE) != 0;
+            if (!too_long && strcmp(g_edit_buf, *target ? *target : "") != 0) {
+                free(*target);
+                /* An emptied edge/group label is removed rather than kept as "". */
+                *target = g_edit_buf[0] ? xstrdup(g_edit_buf) : NULL;
+                mark_dirty();
+            }
         }
         if (too_long) {
             nk_layout_row_dynamic(ctx, 18, 1);

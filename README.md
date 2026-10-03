@@ -187,6 +187,10 @@ it (it stays put -- layout is computed once at load, not a continuous
 simulation). Esc quits from here. Longer files are drawn bigger (on a log
 scale of line count; see `src/render/nodestyle.h`).
 
+The Inspector shows the selected file with line numbers, wrapped to the
+panel's width. A dot in the margin marks a line with a note: click it to
+open the note, or click any line number to add a note to that line.
+
 **File stats.** The Inspector's collapsible Stats section shows, for the
 selected file:
 

@@ -81,6 +81,7 @@ add_executable(Codestellation
     render/theme.c
     render/fonts.c
     render/md_render.c
+    render/textarea.c
     render/canvas_view.c
     ${CODEMAP_FONT_SOURCES}
     ${CMAKE_SOURCE_DIR}/vendor/tinyfiledialogs/tinyfiledialogs.c

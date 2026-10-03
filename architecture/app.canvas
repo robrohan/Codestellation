@@ -34,6 +34,6 @@
 		{"id":"e-cmp-notes-wl-cache","fromNode":"cmp-notes","toNode":"wl-cache","label":"graph.notes.md, graph.overlay.json"},
 		{"id":"e-cmp-graph-wl-cache","fromNode":"cmp-graph","toNode":"wl-cache","label":"graph.json"},
 		{"id":"e-cmp-lang-wl-treesitter","fromNode":"cmp-lang","fromSide":"bottom","toNode":"wl-treesitter","toSide":"left","label":"parse trees + queries"},
-		{"id":"e-cmp-pipeline-wl-git","fromNode":"cmp-pipeline","toNode":"wl-git","label":"git log","fromSide":"left","toSide":"right"}
+		{"id":"e-cmp-pipeline-wl-git","fromNode":"cmp-pipeline","fromSide":"left","toNode":"wl-git","toSide":"right","label":"git log"}
 	]
 }
