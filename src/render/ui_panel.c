@@ -63,8 +63,14 @@ static void reset_delete_arm_if_context_changed(const char *context) {
  * is to expand tabs to spaces before display rather than teach the atlas
  * about control characters. Fixed-width (not column-aware tab stops) --
  * good enough for a preview, and avoids tracking column position across
- * embedded newlines. Caller frees. */
-static char *expand_tabs(const char *src) {
+ * embedded newlines.
+ *
+ * Carriage returns have the same problem: a Windows (CRLF) file showed a
+ * "?" at the end of every line. "\r\n" becomes "\n", and a lone "\r" (old
+ * Mac line endings) becomes "\n" too, so line numbers -- which notes are
+ * anchored to, counted on this same buffer -- still match the file's lines.
+ * Caller frees. */
+static char *clean_for_display(const char *src) {
     const int tab_width = 4;
     size_t len = strlen(src);
     size_t extra = 0;
@@ -76,6 +82,8 @@ static char *expand_tabs(const char *src) {
     for (size_t i = 0; i < len; i++) {
         if (src[i] == '\t') {
             for (int s = 0; s < tab_width; s++) out[o++] = ' ';
+        } else if (src[i] == '\r') {
+            if (src[i + 1] != '\n') out[o++] = '\n';
         } else {
             out[o++] = src[i];
         }
@@ -114,7 +122,7 @@ static void load_file_if_needed(const char *path) {
     size_t got = fread(buf, 1, (size_t)size, f);
     buf[got] = '\0';
     fclose(f);
-    g_cached_content = expand_tabs(buf);
+    g_cached_content = clean_for_display(buf);
     free(buf);
 }
 
