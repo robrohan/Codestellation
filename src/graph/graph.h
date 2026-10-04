@@ -62,16 +62,27 @@ typedef struct {
     char *kind;
 } GraphEdge;
 
+/* A stretch of code found in two places (pipeline/dupes.h): lines
+ * [a_line, a_end] of node a match lines [b_line, b_end] of node b,
+ * 1-based and inclusive. a and b can be the same file. */
+typedef struct {
+    int a, a_line, a_end;
+    int b, b_line, b_end;
+} GraphClone;
+
 typedef struct {
     GraphNode *nodes;
     size_t     node_count, node_cap;
     GraphEdge *edges;
     size_t     edge_count, edge_cap;
+    GraphClone *clones;
+    size_t      clone_count, clone_cap;
 } Graph;
 
 void graph_init(Graph *g);
 int  graph_add_node(Graph *g, const char *path, const char *language);
 void graph_add_edge(Graph *g, int source, int target, const char *kind);
+void graph_add_clone(Graph *g, const GraphClone *c);
 void graph_free(Graph *g);
 
 #endif

@@ -36,13 +36,17 @@ enum {
 /* A gutter icon on a (1-based) line. A filled dot and a ring can share a
  * line: the dot draws inside the ring. `id` comes back when the icon is
  * clicked; a negative id isn't clickable (the click falls through to the
- * line number). `tip`, if set, shows as a tooltip on hover. */
-enum { TEXTAREA_MARKER_DOT, TEXTAREA_MARKER_RING };
+ * line number). `tip`, if set, shows as a tooltip on hover; '\n' splits
+ * it into lines. A bar runs down the gutter's left edge from `line` to
+ * `end_line` (inclusive), beside any dot or ring, and its tip shows
+ * anywhere along it; other styles ignore end_line. */
+enum { TEXTAREA_MARKER_DOT, TEXTAREA_MARKER_RING, TEXTAREA_MARKER_BAR };
 typedef struct {
     int line;
     int id;
     int style;
     const char *tip;
+    int end_line;
 } TextAreaMarker;
 
 typedef struct {

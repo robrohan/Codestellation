@@ -40,6 +40,14 @@ void graph_add_edge(Graph *g, int source, int target, const char *kind) {
     g->edge_count++;
 }
 
+void graph_add_clone(Graph *g, const GraphClone *c) {
+    if (g->clone_count == g->clone_cap) {
+        g->clone_cap = g->clone_cap ? g->clone_cap * 2 : 64;
+        g->clones = (GraphClone *)realloc(g->clones, g->clone_cap * sizeof(GraphClone));
+    }
+    g->clones[g->clone_count++] = *c;
+}
+
 void graph_free(Graph *g) {
     for (size_t i = 0; i < g->node_count; i++) {
         free(g->nodes[i].path);
@@ -50,4 +58,5 @@ void graph_free(Graph *g) {
     }
     free(g->nodes);
     free(g->edges);
+    free(g->clones);
 }

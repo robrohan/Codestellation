@@ -5,6 +5,7 @@
 #include "filestats.h"
 #include "graphstats.h"
 #include "gitstats.h"
+#include "dupes.h"
 #include "../lang/registry.h"
 #include "../graph/graph.h"
 #include "../graph/graph_json.h"
@@ -63,6 +64,7 @@ bool build_graph_json(const char *const *roots, size_t root_count, const char *o
     graphstats_compute(&graph);
     gitstats_compute(&graph, roots, root_count);
     graphstats_rank_hotspots(&graph);
+    dupes_compute(&parsed, &graph);
     printf("stats: done\n");
 
     bool ok = graph_write_json(&graph, out_path);

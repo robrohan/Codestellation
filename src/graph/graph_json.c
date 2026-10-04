@@ -93,6 +93,14 @@ bool graph_write_json(const Graph *g, const char *out_path) {
         write_escaped(f, g->edges[i].kind);
         fputc('}', f);
     }
+    /* Duplicated code (pipeline/dupes.h). Not part of node-link format;
+     * networkx and older readers ignore the key. */
+    fprintf(f, "], \"clones\": [");
+    for (size_t i = 0; i < g->clone_count; i++) {
+        const GraphClone *c = &g->clones[i];
+        fprintf(f, "%s{\"a\": %d, \"a_line\": %d, \"a_end\": %d, \"b\": %d, \"b_line\": %d, \"b_end\": %d}",
+                i ? "," : "", c->a, c->a_line, c->a_end, c->b, c->b_line, c->b_end);
+    }
     fprintf(f, "]}\n");
 
     fclose(f);
@@ -204,6 +212,26 @@ bool graph_read_json(const char *path, Graph *out) {
             graph_add_edge(out, atoi(src_n->number), atoi(tgt_n->number), k);
             free(k);
         }
+    }
+
+    static const char *const CLONE_KEYS[6] = { "a", "a_line", "a_end", "b", "b_line", "b_end" };
+    struct json_value_s *clones_v = obj_get(root_obj, "clones");
+    struct json_array_s *clones_arr = clones_v ? json_value_as_array(clones_v) : NULL;
+    for (struct json_array_element_s *e = clones_arr ? clones_arr->start : NULL; e; e = e->next) {
+        struct json_object_s *c = json_value_as_object(e->value);
+        if (!c) continue;
+        int v[6];
+        bool ok = true;
+        for (int k = 0; k < 6 && ok; k++) {
+            struct json_value_s *kv = obj_get(c, CLONE_KEYS[k]);
+            struct json_number_s *num = kv ? json_value_as_number(kv) : NULL;
+            if (num) v[k] = atoi(num->number);
+            else ok = false;
+        }
+        if (!ok || v[0] < 0 || v[3] < 0 || (size_t)v[0] >= out->node_count || (size_t)v[3] >= out->node_count)
+            continue;
+        GraphClone gc = { v[0], v[1], v[2], v[3], v[4], v[5] };
+        graph_add_clone(out, &gc);
     }
 
     free(root);

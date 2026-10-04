@@ -31,6 +31,7 @@ const Theme g_theme = {
     .label_shadow = 0x000000,
     .note_dot     = 0xFFB347,
     .complexity_marker = 0xE8685E,
+    .duplicate_marker  = 0x8F9BFF,
 
     .canvas_background   = 0x181B20,
     .grid_minor          = 0x20242B,
