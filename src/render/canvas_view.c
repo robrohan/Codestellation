@@ -788,16 +788,28 @@ static void make_bez(float ax, float ay, float anx, float any, float bx, float b
     b->c2x = bx + bnx * off; b->c2y = by + bny * off;
 }
 
-static bool edge_bez(const CanvasEdge *e, Bez *out) {
-    int ia = canvas_doc_find_node(&g_doc, e->from_node), ib = canvas_doc_find_node(&g_doc, e->to_node);
-    if (ia < 0 || ib < 0) return false;
-    const CanvasNode *a = &g_doc.nodes[ia], *b = &g_doc.nodes[ib];
+/* The sides an edge leaves and arrives on: its written ones, else the
+ * ones facing the other box. False if either end's box is missing. */
+static bool edge_sides(const CanvasEdge *e, int *ia, int *ib, Side *sa, Side *sb) {
+    *ia = canvas_doc_find_node(&g_doc, e->from_node);
+    *ib = canvas_doc_find_node(&g_doc, e->to_node);
+    if (*ia < 0 || *ib < 0) return false;
+    const CanvasNode *a = &g_doc.nodes[*ia], *b = &g_doc.nodes[*ib];
     float acx, acy, bcx, bcy;
     center_of(a, &acx, &acy);
     center_of(b, &bcx, &bcy);
-    Side sa = side_from(e->from_side), sb = side_from(e->to_side);
-    if (sa == SIDE_AUTO) sa = facing_side(a, bcx, bcy);
-    if (sb == SIDE_AUTO) sb = facing_side(b, acx, acy);
+    *sa = side_from(e->from_side);
+    *sb = side_from(e->to_side);
+    if (*sa == SIDE_AUTO) *sa = facing_side(a, bcx, bcy);
+    if (*sb == SIDE_AUTO) *sb = facing_side(b, acx, acy);
+    return true;
+}
+
+static bool edge_bez(const CanvasEdge *e, Bez *out) {
+    int ia, ib;
+    Side sa, sb;
+    if (!edge_sides(e, &ia, &ib, &sa, &sb)) return false;
+    const CanvasNode *a = &g_doc.nodes[ia], *b = &g_doc.nodes[ib];
     float ax, ay, anx, any, bx, by, bnx, bny;
     side_point(a, sa, &ax, &ay, &anx, &any);
     side_point(b, sb, &bx, &by, &bnx, &bny);
@@ -965,6 +977,45 @@ static void set_selection_color(const char *c) {
     mark_dirty();
 }
 
+/* Arrowheads on an edge, as the editor offers them. */
+enum { ARROWS_TO, ARROWS_FROM, ARROWS_BOTH, ARROWS_NONE };
+
+static int edge_arrows(const CanvasEdge *e) {
+    /* Spec defaults: no arrow at the start, one at the end. */
+    bool to = !e->to_end || strcmp(e->to_end, "none") != 0;
+    bool from = e->from_end && strcmp(e->from_end, "arrow") == 0;
+    return to && from ? ARROWS_BOTH : to ? ARROWS_TO : from ? ARROWS_FROM : ARROWS_NONE;
+}
+
+/* Spec defaults are left unwritten, so a plain "->" edge stays as terse
+ * in the file as one drawn by hand. */
+static void set_edge_arrows(CanvasEdge *e, int arrows) {
+    bool to = arrows == ARROWS_TO || arrows == ARROWS_BOTH;
+    bool from = arrows == ARROWS_FROM || arrows == ARROWS_BOTH;
+    free(e->from_end);
+    free(e->to_end);
+    e->from_end = from ? xstrdup("arrow") : NULL;
+    e->to_end = to ? NULL : xstrdup("none");
+    mark_dirty();
+}
+
+/* Locked: the edge's sides are written, so it stays put when its boxes
+ * move. Either side written counts (other editors may write just one). */
+static bool edge_locked(const CanvasEdge *e) { return e->from_side || e->to_side; }
+
+/* Locking pins the sides the edge is drawn on right now; unlocking
+ * clears them so it reflows again. */
+static void set_edge_locked(CanvasEdge *e, bool lock) {
+    int ia, ib;
+    Side sa, sb;
+    bool resolved = lock && edge_sides(e, &ia, &ib, &sa, &sb);
+    free(e->from_side);
+    free(e->to_side);
+    e->from_side = resolved ? xstrdup(side_name(sa)) : NULL;
+    e->to_side = resolved ? xstrdup(side_name(sb)) : NULL;
+    mark_dirty();
+}
+
 /* ---- update ------------------------------------------------------------- */
 
 void canvas_view_update(const CanvasInput *in, int width, int height) {
@@ -1106,13 +1157,11 @@ void canvas_view_update(const CanvasInput *in, int width, int height) {
                 if (target >= 0 && target != g_mode_index && g_doc.nodes[target].type != CNODE_GROUP) {
                     const char *from_id = g_doc.nodes[g_mode_index].id;
                     const char *to_id = g_doc.nodes[target].id;
-                    /* Arrive on the target's side nearest where the drag ended. */
-                    Side to_side = facing_side(&g_doc.nodes[target], in->mx, in->my);
+                    /* No sides written: the edge reflows as its boxes
+                     * move, until it's locked in the editor. */
                     CanvasEdge *e = canvas_doc_add_edge(&g_doc);
                     e->from_node = xstrdup(from_id);
                     e->to_node = xstrdup(to_id);
-                    e->from_side = xstrdup(side_name(g_conn_side));
-                    e->to_side = xstrdup(side_name(to_side));
                     mark_dirty();
                     select_edge((int)g_doc.edge_count - 1);
                 }
@@ -1625,6 +1674,26 @@ static void draw_editor(struct nk_context *ctx, int width, int height, PanelRect
             if (nk_button_color(ctx, theme_nk(g_theme.box_preset[k]))) {
                 char c[2] = { (char)('1' + k), '\0' };
                 set_selection_color(c);
+            }
+        }
+
+        if (is_edge) {
+            CanvasEdge *e = &g_doc.edges[g_sel_index];
+            static const char *const names[] = { "\xE2\x86\x92", "\xE2\x86\x90", "\xE2\x86\x90 \xE2\x86\x92", "none" };
+            int cur_arrows = edge_arrows(e);
+            nk_layout_row_dynamic(ctx, 20, 1);
+            nk_label(ctx, "Arrows", NK_TEXT_LEFT);
+            nk_layout_row_dynamic(ctx, 24, 4);
+            for (int k = 0; k < 4; k++) {
+                nk_bool on = k == cur_arrows;
+                if (nk_selectable_label(ctx, names[k], NK_TEXT_CENTERED, &on) && k != cur_arrows) {
+                    set_edge_arrows(e, k);
+                }
+            }
+            nk_layout_row_dynamic(ctx, 24, 1);
+            nk_bool locked = edge_locked(e);
+            if (nk_checkbox_label(ctx, "Lock sides (don't reflow when boxes move)", &locked)) {
+                set_edge_locked(e, locked);
             }
         }
 
