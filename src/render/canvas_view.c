@@ -41,6 +41,7 @@
 #define SAVE_DEBOUNCE_S 0.6
 #define MIN_W 60.0f
 #define MIN_H 40.0f
+#define GROUP_MIN_DRAG 12.0f   /* screen px each way before a drag draws a group */
 #define EDITOR_TITLE "Edit"
 #define CRUMBS_TITLE "##breadcrumbs"
 #define EDIT_BUF_SIZE 32768
@@ -49,7 +50,7 @@
 #define REF_CACHE 16
 
 typedef enum { SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM, SIDE_LEFT, SIDE_AUTO } Side;
-typedef enum { MODE_NONE, MODE_PAN, MODE_DRAG, MODE_RESIZE, MODE_CONNECT } Mode;
+typedef enum { MODE_NONE, MODE_PAN, MODE_DRAG, MODE_RESIZE, MODE_CONNECT, MODE_GROUP } Mode;
 typedef enum { SEL_NONE, SEL_NODE, SEL_EDGE } SelKind;
 
 typedef struct {
@@ -80,6 +81,7 @@ static int g_hover = -1;
 static Mode g_mode = MODE_NONE;
 static int g_mode_index = -1;        /* node being dragged/resized/connected from */
 static Side g_conn_side = SIDE_AUTO;
+static float g_group_x, g_group_y;   /* MODE_GROUP: where the drag started, screen px */
 static bool g_moved = false;
 static float g_last_x, g_last_y;
 static float g_cursor_x, g_cursor_y;
@@ -1099,7 +1101,8 @@ void canvas_view_update(const CanvasInput *in, int width, int height) {
     if (in->key_delete && !g_edit_active && !g_search_active && g_sel != SEL_NONE) delete_selection();
 
     bool left_edge = in->left && !g_prev_left;
-    bool pan_edge = (in->right && !g_prev_right) || (in->middle && !g_prev_middle);
+    bool right_edge = in->right && !g_prev_right;
+    bool pan_edge = right_edge || (in->middle && !g_prev_middle);
 
     if (g_mode == MODE_NONE && !in->over_panel && left_edge) {
         bool dbl = g_last_click_time >= 0.0 && in->time - g_last_click_time < DOUBLE_CLICK_S &&
@@ -1145,15 +1148,35 @@ void canvas_view_update(const CanvasInput *in, int width, int height) {
                 g_mode = MODE_PAN;
             }
         }
+    } else if (g_mode == MODE_NONE && !in->over_panel && right_edge && in->ctrl) {
+        /* Same chord as grouping in the 3D view. */
+        g_mode = MODE_GROUP;
+        g_group_x = in->mx;
+        g_group_y = in->my;
     } else if (g_mode == MODE_NONE && !in->over_panel && pan_edge) {
         g_mode = MODE_PAN;
         g_last_x = in->mx;
         g_last_y = in->my;
     } else if (g_mode != MODE_NONE) {
-        bool held = (g_mode == MODE_PAN) ? (in->left || in->right || in->middle) : in->left;
+        bool held = (g_mode == MODE_PAN) ? (in->left || in->right || in->middle)
+                  : (g_mode == MODE_GROUP) ? in->right : in->left;
         float dx = in->mx - g_last_x, dy = in->my - g_last_y;
         if (!held) {
-            if (g_mode == MODE_CONNECT) {
+            if (g_mode == MODE_GROUP) {
+                /* A click or a twitch isn't a group -- nothing is made. */
+                float x0 = fminf(g_group_x, in->mx), y0 = fminf(g_group_y, in->my);
+                float w = fabsf(in->mx - g_group_x), h = fabsf(in->my - g_group_y);
+                if (w >= GROUP_MIN_DRAG && h >= GROUP_MIN_DRAG) {
+                    CanvasNode *n = canvas_doc_add_node(&g_doc, CNODE_GROUP);
+                    n->x = roundf((x0 - g_ox) / g_zoom);
+                    n->y = roundf((y0 - g_oy) / g_zoom);
+                    n->w = roundf(fmaxf(MIN_W, w / g_zoom));
+                    n->h = roundf(fmaxf(MIN_H, h / g_zoom));
+                    mark_dirty();
+                    select_node((int)g_doc.node_count - 1);
+                    open_editor(true);
+                }
+            } else if (g_mode == MODE_CONNECT) {
                 int target = hit_node(in->mx, in->my);
                 if (target >= 0 && target != g_mode_index && g_doc.nodes[target].type != CNODE_GROUP) {
                     const char *from_id = g_doc.nodes[g_mode_index].id;
@@ -1484,6 +1507,13 @@ static void draw_canvas_layer(struct nk_context *ctx, int width, int height) {
             struct nk_color col = theme_nk(g_theme.box_border_selected);
             nk_stroke_curve(c, b.ax, b.ay, b.c1x, b.c1y, b.c2x, b.c2y, b.bx, b.by, 1.5f, col);
         }
+        if (g_mode == MODE_GROUP) {
+            struct nk_rect r = nk_rect(fminf(g_group_x, g_cursor_x), fminf(g_group_y, g_cursor_y),
+                                       fabsf(g_cursor_x - g_group_x), fabsf(g_cursor_y - g_group_y));
+            float rounding = 8.0f * fminf(g_zoom, 1.5f);
+            nk_fill_rect(c, r, rounding, with_alpha(g_theme.box_border_selected, 28));
+            nk_stroke_rect(c, r, rounding, 1.5f, theme_nk(g_theme.box_border_selected));
+        }
         if (g_mode == MODE_NONE && g_hover >= 0) draw_handles(c, g_hover);
         if (g_sel == SEL_NODE && g_sel_index >= 0 && g_sel_index < (int)g_doc.node_count) {
             draw_handles(c, g_sel_index);
@@ -1497,17 +1527,16 @@ static void draw_canvas_layer(struct nk_context *ctx, int width, int height) {
             draw_text_at(c, ((float)width - w) * 0.5f, (float)height * 0.5f, hint, g_theme.canvas_edge_label);
         }
 
-        char hud[160];
+#ifdef __APPLE__
+        const char *mod = "Cmd";
+#else
+        const char *mod = "Ctrl";
+#endif
+        char hud[256];
         snprintf(hud, sizeof(hud),
                  "%.0f%%   \xC2\xB7   double-click: add / edit   \xC2\xB7   shift+click: go in / open code   "
-                 "\xC2\xB7   %s+F: search   \xC2\xB7   Esc: up",
-                 g_zoom * 100.0f,
-#ifdef __APPLE__
-                 "Cmd"
-#else
-                 "Ctrl"
-#endif
-        );
+                 "\xC2\xB7   %s+right-drag: group   \xC2\xB7   %s+F: search   \xC2\xB7   Esc: up",
+                 g_zoom * 100.0f, mod, mod);
         float fh = fonts_ui()->height;
         draw_text_at(c, 12.0f, (float)height - fh - 12.0f, hud, g_theme.canvas_edge_label);
         if (g_load_failed) {

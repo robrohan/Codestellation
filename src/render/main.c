@@ -690,6 +690,7 @@ int main(int argc, char **argv) {
                 .right = right_state == GLFW_PRESS,
                 .middle = middle_state == GLFW_PRESS,
                 .shift = (g_press_mods & GLFW_MOD_SHIFT) != 0, /* held at the click, see g_press_mods */
+                .ctrl = (g_press_mods & (GLFW_MOD_CONTROL | GLFW_MOD_SUPER)) != 0,
                 .scroll = scroll_y,
                 .time = glfwGetTime(),
                 .over_panel = over_panel,

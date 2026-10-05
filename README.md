@@ -155,6 +155,9 @@ files, so Obsidian can open them too. On the canvas:
 - drag a box to move it, its bottom-right corner to resize, one of its side
   dots to draw an edge to another box. Edges reattach to the facing sides as
   boxes move; tick "Lock sides" in an edge's editor to pin it where it is
+- Cmd/Ctrl+right-drag to draw a group: a labelled frame behind the boxes, for
+  notes or a rough grouping while you work something out (moving it doesn't
+  carry the boxes inside along)
 - shift+click a box containing `[[something.canvas]]` to go into that canvas
   (created on first visit); the breadcrumb bar at the top walks back out
 - shift+click a box whose `[[links]]` point at folders (relative to the
