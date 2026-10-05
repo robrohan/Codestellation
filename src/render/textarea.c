@@ -138,22 +138,25 @@ static void wrap_line(const struct nk_user_font *f, const char *t, size_t ls, si
             x = 0.0f;
             continue;
         }
-        /* One word wider than the row: break it between characters. */
+        /* One word wider than the row: break it between characters, all
+         * in one pass -- re-measuring the rest of the word after every
+         * break is quadratic, and a multi-MB line with no spaces (a SQL
+         * dump's INSERT) then hangs the app. The tail stays on the
+         * current row for the next word to follow. */
         size_t k = i;
-        float cx = 0.0f;
         while (k < j) {
             size_t nk = next_cp(t, le, k);
             float cw = run_width(f, t + k, nk - k);
-            if (cx + cw > width && k > i) break;
-            cx += cw;
+            if (x + cw > width && k > row_start) {
+                push_row(rows, count, cap, row_start, k, line);
+                pushed++;
+                row_start = k;
+                x = 0.0f;
+            }
+            x += cw;
             k = nk;
         }
-        if (k >= le) break;
-        push_row(rows, count, cap, row_start, k, line);
-        pushed++;
-        row_start = k;
-        i = k;
-        x = 0.0f;
+        i = j;
     }
     if (row_start < le || pushed == 0) push_row(rows, count, cap, row_start, le, line);
 }
@@ -549,6 +552,29 @@ static int digit_count(int n) {
     return d;
 }
 
+/* nk_tooltip, but one row per '\n'-separated line. */
+static void multiline_tooltip(struct nk_context *ctx, const char *tip) {
+    const struct nk_user_font *f = ctx->style.font;
+    struct nk_vec2 pad = ctx->style.window.padding;
+    float widest = 0.0f;
+    for (const char *p = tip;;) {
+        const char *nl = strchr(p, '\n');
+        float w = font_width(f, p, nl ? (size_t)(nl - p) : strlen(p));
+        if (w > widest) widest = w;
+        if (!nl) break;
+        p = nl + 1;
+    }
+    if (!nk_tooltip_begin(ctx, widest + 4.0f * pad.x)) return;
+    nk_layout_row_dynamic(ctx, f->height + 2.0f, 1);
+    for (const char *p = tip;;) {
+        const char *nl = strchr(p, '\n');
+        nk_text(ctx, p, nl ? (int)(nl - p) : (int)strlen(p), NK_TEXT_LEFT);
+        if (!nl) break;
+        p = nl + 1;
+    }
+    nk_tooltip_end(ctx);
+}
+
 void textarea_draw(struct nk_context *ctx, TextArea *ta, const TextAreaMarker *markers, int marker_count,
                    TextAreaResult *out) {
     TextAreaResult res = { false, false, 0, -1 };
@@ -703,7 +729,9 @@ void textarea_draw(struct nk_context *ctx, TextArea *ta, const TextAreaMarker *m
     struct nk_color dim = nk_rgba(fg.r, fg.g, fg.b, 110);
     struct nk_color dot_color = theme_nk(g_theme.note_dot);
     struct nk_color ring_color = theme_nk(g_theme.complexity_marker);
+    struct nk_color bar_color = theme_nk(g_theme.duplicate_marker);
     const char *hover_tip = NULL;
+    int tip_rank = 0; /* 1 dot, 2 bar, 3 ring */
     bool mouse_in_markers = in && nk_input_is_mouse_hovering_rect(in, intersect(nk_rect(inner.x, inner.y, marker_w, inner.h), old_clip));
     size_t lo = sel_lo(ta), hi = sel_hi(ta);
     float space_w = font_width(f, " ", 1);
@@ -715,9 +743,21 @@ void textarea_draw(struct nk_context *ctx, TextArea *ta, const TextAreaMarker *m
         const TextAreaRow *row = &ta->rows[r];
         bool line_start = r == 0 || ta->rows[r - 1].line != row->line;
 
+        bool hovered_row = mouse_in_markers && in->mouse.pos.y >= y && in->mouse.pos.y < y + row_h;
+        if (ta->flags & TEXTAREA_GUTTER) {
+            /* Bars cover wrapped rows too, so a range reads as one stripe. */
+            for (int i = 0; i < marker_count; i++) {
+                if (markers[i].style != TEXTAREA_MARKER_BAR) continue;
+                if (row->line < markers[i].line || row->line > markers[i].end_line) continue;
+                nk_fill_rect(canvas, nk_rect(inner.x + 1.0f, y, 3.0f, row_h), 0, bar_color);
+                if (hovered_row && markers[i].tip && tip_rank < 2) {
+                    hover_tip = markers[i].tip;
+                    tip_rank = 2;
+                }
+            }
+        }
         if ((ta->flags & TEXTAREA_GUTTER) && line_start) {
             float cx = inner.x + marker_w * 0.5f, cy = y + row_h * 0.5f;
-            bool hovered_row = mouse_in_markers && in->mouse.pos.y >= y && in->mouse.pos.y < y + row_h;
             for (int pass = 0; pass < 2; pass++) { /* rings first, dots on top */
                 int style = pass == 0 ? TEXTAREA_MARKER_RING : TEXTAREA_MARKER_DOT;
                 for (int i = 0; i < marker_count; i++) {
@@ -729,9 +769,13 @@ void textarea_draw(struct nk_context *ctx, TextArea *ta, const TextAreaMarker *m
                         float d = row_h * 0.42f;
                         nk_fill_circle(canvas, nk_rect(cx - d * 0.5f, cy - d * 0.5f, d, d), dot_color);
                     }
-                    /* The ring's tip wins: it says why the line is marked. */
-                    if (hovered_row && markers[i].tip && (!hover_tip || style == TEXTAREA_MARKER_RING))
+                    /* The ring's tip wins, then a bar's: they say why the
+                     * line is marked; a note dot's tip is just the note. */
+                    int rank = style == TEXTAREA_MARKER_RING ? 3 : 1;
+                    if (hovered_row && markers[i].tip && rank > tip_rank) {
                         hover_tip = markers[i].tip;
+                        tip_rank = rank;
+                    }
                     break;
                 }
             }
@@ -770,7 +814,7 @@ void textarea_draw(struct nk_context *ctx, TextArea *ta, const TextAreaMarker *m
         nk_fill_rect(canvas, nk_rect(bar.x, thumb_y, bar.w, thumb_h), bar.w * 0.5f, tc);
     }
     nk_push_scissor(canvas, old_clip);
-    if (hover_tip) nk_tooltip(ctx, hover_tip);
+    if (hover_tip) multiline_tooltip(ctx, hover_tip);
 
     res.focused = ta->focused;
     if (out) *out = res;

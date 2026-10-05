@@ -310,6 +310,99 @@ static void draw_stats(struct nk_context *ctx, const Graph *g, int selected) {
     stat_row(ctx, "Hotspot", v);
 }
 
+/* ---- Duplicate-code bars ------------------------------------------------- */
+
+#define DUP_MARKERS_MAX 32
+#define DUP_TIP_PLACES 12
+
+/* One copied stretch of the selected file, and where else it is. */
+typedef struct {
+    int line, end;
+    int other, other_line, other_end;
+} DupPlace;
+
+static int cmp_dup_place(const void *pa, const void *pb) {
+    const DupPlace *a = (const DupPlace *)pa, *b = (const DupPlace *)pb;
+    if (a->line != b->line) return a->line < b->line ? -1 : 1;
+    return (a->end > b->end) - (a->end < b->end);
+}
+
+/* Length of the folder prefix every file in the graph shares, so the
+ * tooltip shows "src/x.c" rather than the full path. */
+static size_t common_dir_len(const Graph *g) {
+    if (g->node_count == 0) return 0;
+    const char *first = g->nodes[0].path;
+    size_t n = strlen(first);
+    for (size_t i = 1; i < g->node_count && n > 0; i++) {
+        const char *p = g->nodes[i].path;
+        size_t k = 0;
+        while (k < n && p[k] && p[k] == first[k]) k++;
+        n = k;
+    }
+    while (n > 0 && first[n - 1] != '/' && first[n - 1] != '\\') n--;
+    return n;
+}
+
+/* Fills markers with a bar per copied stretch of the selected file
+ * (overlapping stretches merged), each tipped with the other places the
+ * code appears. Returns how many were added. */
+static int duplicate_markers(const Graph *g, int selected, TextAreaMarker *markers, int cap) {
+    static char tips[DUP_MARKERS_MAX][1024];
+    static DupPlace *places = NULL;
+    static size_t places_cap = 0;
+
+    size_t n = 0;
+    for (size_t i = 0; i < g->clone_count; i++) {
+        const GraphClone *c = &g->clones[i];
+        for (int side = 0; side < 2; side++) {
+            if ((side == 0 ? c->a : c->b) != selected) continue;
+            if (n == places_cap) {
+                places_cap = places_cap ? places_cap * 2 : 64;
+                places = (DupPlace *)realloc(places, places_cap * sizeof(DupPlace));
+            }
+            places[n++] = side == 0 ? (DupPlace){ c->a_line, c->a_end, c->b, c->b_line, c->b_end }
+                                    : (DupPlace){ c->b_line, c->b_end, c->a, c->a_line, c->a_end };
+        }
+    }
+    if (n == 0) return 0;
+    qsort(places, n, sizeof(DupPlace), cmp_dup_place);
+    size_t strip = common_dir_len(g);
+
+    int count = 0;
+    if (cap > DUP_MARKERS_MAX) cap = DUP_MARKERS_MAX;
+    for (size_t s = 0; s < n && count < cap;) {
+        size_t e = s + 1;
+        int end = places[s].end;
+        while (e < n && places[e].line <= end) {
+            if (places[e].end > end) end = places[e].end;
+            e++;
+        }
+        char *tip = tips[count];
+        size_t cap_b = sizeof(tips[count]);
+        size_t len = (size_t)snprintf(tip, cap_b, "Lines %d-%d are also in:", places[s].line, end);
+        int listed = 0, more = 0;
+        for (size_t k = s; k < e; k++) {
+            bool seen = false;
+            for (size_t j = s; j < k && !seen; j++) {
+                seen = places[j].other == places[k].other && places[j].other_line == places[k].other_line &&
+                       places[j].other_end == places[k].other_end;
+            }
+            if (seen) continue;
+            if (listed == DUP_TIP_PLACES) { more++; continue; }
+            const char *path = places[k].other == selected ? "this file" : g->nodes[places[k].other].path + strip;
+            if (len < cap_b) {
+                len += (size_t)snprintf(tip + len, cap_b - len, "\n  %s:%d-%d", path, places[k].other_line,
+                                        places[k].other_end);
+            }
+            listed++;
+        }
+        if (more && len < cap_b) snprintf(tip + len, cap_b - len, "\n  ...and %d more", more);
+        markers[count++] = (TextAreaMarker){ places[s].line, -1, TEXTAREA_MARKER_BAR, tip, end };
+        s = e;
+    }
+    return count;
+}
+
 static void draw_single_mode(struct nk_context *ctx, float panel_h, const Graph *graph, int selected,
                               const char *selected_path, const char *selected_language,
                               NoteSet *notes, const char *notes_md_path) {
@@ -374,9 +467,10 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h, const Graph 
     size_t found_n = notes_find_for_path(notes, selected_path, found, 64);
 
     /* Gutter markers: a dot on every line with a note (id = index into
-     * found, clickable), and a ring around the start of each of the
-     * file's most complex functions (not clickable; tooltip says why). */
-    TextAreaMarker markers[64 + STATS_HOT_MAX];
+     * found, clickable), a ring around the start of each of the file's
+     * most complex functions, and a bar beside code that's copied
+     * elsewhere in the project (neither clickable; tooltip says why). */
+    TextAreaMarker markers[64 + STATS_HOT_MAX + DUP_MARKERS_MAX];
     static char hot_tips[STATS_HOT_MAX][96];
     int marker_n = 0;
     for (size_t i = 0; i < found_n; i++) {
@@ -391,6 +485,7 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h, const Graph 
                      st->hot[k].name[0] ? st->hot[k].name : "anonymous function", st->hot[k].complexity);
             markers[marker_n++] = (TextAreaMarker){ st->hot[k].line, -1, TEXTAREA_MARKER_RING, hot_tips[k] };
         }
+        marker_n += duplicate_markers(graph, selected, markers + marker_n, DUP_MARKERS_MAX);
     }
 
     nk_layout_row_dynamic(ctx, content_h, 1);

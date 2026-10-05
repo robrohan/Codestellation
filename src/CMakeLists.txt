@@ -41,6 +41,7 @@ add_executable(Codestellation
     pipeline/filestats.c
     pipeline/graphstats.c
     pipeline/gitstats.c
+    pipeline/dupes.c
     lang/registry.c
     lang/c/c_adapter.c
     lang/csharp/csharp_adapter.c

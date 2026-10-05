@@ -31,6 +31,6 @@
 		{"id":"e-tool-skill-store-project","fromNode":"tool-skill","fromSide":"top","toNode":"store-project","toSide":"top","label":"generates starter map"},
 		{"id":"e-tool-scripts-store-cache","fromNode":"tool-scripts","fromSide":"right","toNode":"store-cache","toSide":"bottom","label":"sanity_check.py reads graph.json"},
 		{"id":"e-tool-test-data-ctr-app","fromNode":"tool-test-data","fromSide":"top","toNode":"ctr-app","toSide":"bottom","label":"sample input per language"},
-		{"id":"e-ctr-app-ext-git","fromNode":"ctr-app","toNode":"ext-git","label":"git log (churn stats)","fromSide":"bottom","toSide":"top"}
+		{"id":"e-ctr-app-ext-git","fromNode":"ctr-app","fromSide":"bottom","toNode":"ext-git","toSide":"top","label":"git log (churn stats)"}
 	]
 }

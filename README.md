@@ -192,6 +192,13 @@ panel's width. A dot in the margin marks a line with a note: click it to
 open the note, or click any line number to add a note to that line. A red
 ring marks where each of the file's most complex functions starts (up to
 five, complexity 10 and up); hover it for the function's name and score.
+A blue bar down the margin marks code that also appears somewhere else in
+the project, in any file or folder (or elsewhere in the same file); hover it
+for the list of other places, as `path:first-last` lines. A copy is at
+least 50 tokens over 5 lines, compared token by token, so layout and comments
+don't matter but renamed variables do. Only code files are compared (the
+languages with complexity, below), only against the same language, and files
+over 1 MB are skipped as generated.
 
 **File stats.** The Inspector's collapsible Stats section shows, for the
 selected file:
@@ -233,7 +240,8 @@ networkx "node-link" format:
   "graph": {},
   "nodes": [{"id": 0, "path": "/abs/path/foo.c", "language": "c",
              "lines": 120, "complexity": 14, "fan_in": 3, "git_commits": 9, ...}],
-  "links": [{"source": 0, "target": 1, "kind": "import"}]
+  "links": [{"source": 0, "target": 1, "kind": "import"}],
+  "clones": [{"a": 0, "a_line": 40, "a_end": 78, "b": 5, "b_line": 120, "b_end": 158}]
 }
 ```
 
@@ -245,6 +253,10 @@ Each node also carries the file stats: `lines`, `blank_lines`,
 `hotspot_rank`, and `hot_functions` (`[{"line", "complexity", "name"}]`,
 the most complex functions first). A key that doesn't apply is left out, e.g. no `complexity`
 for JSON and no `git_*` outside a repo. See `NodeStats` in `src/graph/graph.h`.
+
+`clones` lists duplicated code: lines `a_line`-`a_end` of node `a` match
+lines `b_line`-`b_end` of node `b` (1-based, inclusive; `a` and `b` can be
+the same file). networkx ignores the key. See `src/pipeline/dupes.h`.
 
 Load in Python: `nx.node_link_graph(json.load(f), edges="links")`
 (older networkx: drop the `edges` kwarg).
