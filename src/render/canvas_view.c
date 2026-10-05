@@ -12,6 +12,7 @@
 #include "textarea.h"
 #include "fonts.h"
 #include "theme.h"
+#include "winstate.h"
 #include "../canvas/canvas_doc.h"
 #include "../canvas/project.h"
 #include "../canvas/canvas_index.h"
@@ -1587,9 +1588,8 @@ static void draw_editor(struct nk_context *ctx, int width, int height, PanelRect
     CanvasNode *node = is_edge ? NULL : &g_doc.nodes[g_sel_index];
     bool weak = node && canvas_node_is_weak_link(node);
 
-    struct nk_rect initial = nk_rect((float)width - 460.0f, 60.0f, 440.0f, fmaxf((float)height - 120.0f, 300.0f));
-    if (nk_begin(ctx, EDITOR_TITLE, initial,
-                 NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE)) {
+    if (winstate_begin(ctx, EDITOR_TITLE, (float)width - 460.0f, 60.0f, 440.0f, fmaxf((float)height - 120.0f, 300.0f),
+                       NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE)) {
         struct nk_rect b = nk_window_get_bounds(ctx);
         *out = (PanelRect){ b.x, b.y, b.w, b.h };
 
@@ -1729,9 +1729,8 @@ static void draw_search(struct nk_context *ctx, int width, int height, PanelRect
         *out = (PanelRect){ 0, 0, 0, 0 };
         return;
     }
-    struct nk_rect initial = nk_rect((float)width * 0.5f - 280.0f, 64.0f, 560.0f, fminf((float)height - 120.0f, 480.0f));
-    if (nk_begin(ctx, SEARCH_TITLE, initial,
-                 NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE)) {
+    if (winstate_begin(ctx, SEARCH_TITLE, (float)width * 0.5f - 280.0f, 64.0f, 560.0f, fminf((float)height - 120.0f, 480.0f),
+                       NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE)) {
         struct nk_rect b = nk_window_get_bounds(ctx);
         *out = (PanelRect){ b.x, b.y, b.w, b.h };
 

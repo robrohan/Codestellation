@@ -9,6 +9,7 @@
 
 #include "note_compose.h"
 #include "textarea.h"
+#include "winstate.h"
 #include "../common/pathutil.h"
 #include "../notes/filehash.h"
 #include <stdlib.h>
@@ -98,9 +99,9 @@ void note_compose_draw(struct nk_context *ctx, NoteSet *notes, const char *notes
     out_bounds->x = out_bounds->y = out_bounds->w = out_bounds->h = 0.0f;
     if (!g_open) return;
 
-    if (nk_begin(ctx, NOTE_COMPOSE_TITLE, nk_rect(320, 140, 380, 400),
-                 NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
-                 NK_WINDOW_MINIMIZABLE)) {
+    if (winstate_begin(ctx, NOTE_COMPOSE_TITLE, 320, 140, 380, 400,
+                       NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
+                       NK_WINDOW_MINIMIZABLE)) {
         struct nk_vec2 size = nk_window_get_size(ctx);
         bool single = (g_target_count == 1);
 
