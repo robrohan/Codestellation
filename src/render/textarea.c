@@ -138,22 +138,25 @@ static void wrap_line(const struct nk_user_font *f, const char *t, size_t ls, si
             x = 0.0f;
             continue;
         }
-        /* One word wider than the row: break it between characters. */
+        /* One word wider than the row: break it between characters, all
+         * in one pass -- re-measuring the rest of the word after every
+         * break is quadratic, and a multi-MB line with no spaces (a SQL
+         * dump's INSERT) then hangs the app. The tail stays on the
+         * current row for the next word to follow. */
         size_t k = i;
-        float cx = 0.0f;
         while (k < j) {
             size_t nk = next_cp(t, le, k);
             float cw = run_width(f, t + k, nk - k);
-            if (cx + cw > width && k > i) break;
-            cx += cw;
+            if (x + cw > width && k > row_start) {
+                push_row(rows, count, cap, row_start, k, line);
+                pushed++;
+                row_start = k;
+                x = 0.0f;
+            }
+            x += cw;
             k = nk;
         }
-        if (k >= le) break;
-        push_row(rows, count, cap, row_start, k, line);
-        pushed++;
-        row_start = k;
-        i = k;
-        x = 0.0f;
+        i = j;
     }
     if (row_start < le || pushed == 0) push_row(rows, count, cap, row_start, le, line);
 }
