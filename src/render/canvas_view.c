@@ -12,6 +12,7 @@
 #include "textarea.h"
 #include "fonts.h"
 #include "theme.h"
+#include "winstate.h"
 #include "../canvas/canvas_doc.h"
 #include "../canvas/project.h"
 #include "../canvas/canvas_index.h"
@@ -40,6 +41,7 @@
 #define SAVE_DEBOUNCE_S 0.6
 #define MIN_W 60.0f
 #define MIN_H 40.0f
+#define GROUP_MIN_DRAG 12.0f   /* screen px each way before a drag draws a group */
 #define EDITOR_TITLE "Edit"
 #define CRUMBS_TITLE "##breadcrumbs"
 #define EDIT_BUF_SIZE 32768
@@ -48,7 +50,7 @@
 #define REF_CACHE 16
 
 typedef enum { SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM, SIDE_LEFT, SIDE_AUTO } Side;
-typedef enum { MODE_NONE, MODE_PAN, MODE_DRAG, MODE_RESIZE, MODE_CONNECT } Mode;
+typedef enum { MODE_NONE, MODE_PAN, MODE_DRAG, MODE_RESIZE, MODE_CONNECT, MODE_GROUP } Mode;
 typedef enum { SEL_NONE, SEL_NODE, SEL_EDGE } SelKind;
 
 typedef struct {
@@ -79,6 +81,7 @@ static int g_hover = -1;
 static Mode g_mode = MODE_NONE;
 static int g_mode_index = -1;        /* node being dragged/resized/connected from */
 static Side g_conn_side = SIDE_AUTO;
+static float g_group_x, g_group_y;   /* MODE_GROUP: where the drag started, screen px */
 static bool g_moved = false;
 static float g_last_x, g_last_y;
 static float g_cursor_x, g_cursor_y;
@@ -788,16 +791,28 @@ static void make_bez(float ax, float ay, float anx, float any, float bx, float b
     b->c2x = bx + bnx * off; b->c2y = by + bny * off;
 }
 
-static bool edge_bez(const CanvasEdge *e, Bez *out) {
-    int ia = canvas_doc_find_node(&g_doc, e->from_node), ib = canvas_doc_find_node(&g_doc, e->to_node);
-    if (ia < 0 || ib < 0) return false;
-    const CanvasNode *a = &g_doc.nodes[ia], *b = &g_doc.nodes[ib];
+/* The sides an edge leaves and arrives on: its written ones, else the
+ * ones facing the other box. False if either end's box is missing. */
+static bool edge_sides(const CanvasEdge *e, int *ia, int *ib, Side *sa, Side *sb) {
+    *ia = canvas_doc_find_node(&g_doc, e->from_node);
+    *ib = canvas_doc_find_node(&g_doc, e->to_node);
+    if (*ia < 0 || *ib < 0) return false;
+    const CanvasNode *a = &g_doc.nodes[*ia], *b = &g_doc.nodes[*ib];
     float acx, acy, bcx, bcy;
     center_of(a, &acx, &acy);
     center_of(b, &bcx, &bcy);
-    Side sa = side_from(e->from_side), sb = side_from(e->to_side);
-    if (sa == SIDE_AUTO) sa = facing_side(a, bcx, bcy);
-    if (sb == SIDE_AUTO) sb = facing_side(b, acx, acy);
+    *sa = side_from(e->from_side);
+    *sb = side_from(e->to_side);
+    if (*sa == SIDE_AUTO) *sa = facing_side(a, bcx, bcy);
+    if (*sb == SIDE_AUTO) *sb = facing_side(b, acx, acy);
+    return true;
+}
+
+static bool edge_bez(const CanvasEdge *e, Bez *out) {
+    int ia, ib;
+    Side sa, sb;
+    if (!edge_sides(e, &ia, &ib, &sa, &sb)) return false;
+    const CanvasNode *a = &g_doc.nodes[ia], *b = &g_doc.nodes[ib];
     float ax, ay, anx, any, bx, by, bnx, bny;
     side_point(a, sa, &ax, &ay, &anx, &any);
     side_point(b, sb, &bx, &by, &bnx, &bny);
@@ -965,6 +980,45 @@ static void set_selection_color(const char *c) {
     mark_dirty();
 }
 
+/* Arrowheads on an edge, as the editor offers them. */
+enum { ARROWS_TO, ARROWS_FROM, ARROWS_BOTH, ARROWS_NONE };
+
+static int edge_arrows(const CanvasEdge *e) {
+    /* Spec defaults: no arrow at the start, one at the end. */
+    bool to = !e->to_end || strcmp(e->to_end, "none") != 0;
+    bool from = e->from_end && strcmp(e->from_end, "arrow") == 0;
+    return to && from ? ARROWS_BOTH : to ? ARROWS_TO : from ? ARROWS_FROM : ARROWS_NONE;
+}
+
+/* Spec defaults are left unwritten, so a plain "->" edge stays as terse
+ * in the file as one drawn by hand. */
+static void set_edge_arrows(CanvasEdge *e, int arrows) {
+    bool to = arrows == ARROWS_TO || arrows == ARROWS_BOTH;
+    bool from = arrows == ARROWS_FROM || arrows == ARROWS_BOTH;
+    free(e->from_end);
+    free(e->to_end);
+    e->from_end = from ? xstrdup("arrow") : NULL;
+    e->to_end = to ? NULL : xstrdup("none");
+    mark_dirty();
+}
+
+/* Locked: the edge's sides are written, so it stays put when its boxes
+ * move. Either side written counts (other editors may write just one). */
+static bool edge_locked(const CanvasEdge *e) { return e->from_side || e->to_side; }
+
+/* Locking pins the sides the edge is drawn on right now; unlocking
+ * clears them so it reflows again. */
+static void set_edge_locked(CanvasEdge *e, bool lock) {
+    int ia, ib;
+    Side sa, sb;
+    bool resolved = lock && edge_sides(e, &ia, &ib, &sa, &sb);
+    free(e->from_side);
+    free(e->to_side);
+    e->from_side = resolved ? xstrdup(side_name(sa)) : NULL;
+    e->to_side = resolved ? xstrdup(side_name(sb)) : NULL;
+    mark_dirty();
+}
+
 /* ---- update ------------------------------------------------------------- */
 
 void canvas_view_update(const CanvasInput *in, int width, int height) {
@@ -1047,7 +1101,8 @@ void canvas_view_update(const CanvasInput *in, int width, int height) {
     if (in->key_delete && !g_edit_active && !g_search_active && g_sel != SEL_NONE) delete_selection();
 
     bool left_edge = in->left && !g_prev_left;
-    bool pan_edge = (in->right && !g_prev_right) || (in->middle && !g_prev_middle);
+    bool right_edge = in->right && !g_prev_right;
+    bool pan_edge = right_edge || (in->middle && !g_prev_middle);
 
     if (g_mode == MODE_NONE && !in->over_panel && left_edge) {
         bool dbl = g_last_click_time >= 0.0 && in->time - g_last_click_time < DOUBLE_CLICK_S &&
@@ -1093,26 +1148,44 @@ void canvas_view_update(const CanvasInput *in, int width, int height) {
                 g_mode = MODE_PAN;
             }
         }
+    } else if (g_mode == MODE_NONE && !in->over_panel && right_edge && in->ctrl) {
+        /* Same chord as grouping in the 3D view. */
+        g_mode = MODE_GROUP;
+        g_group_x = in->mx;
+        g_group_y = in->my;
     } else if (g_mode == MODE_NONE && !in->over_panel && pan_edge) {
         g_mode = MODE_PAN;
         g_last_x = in->mx;
         g_last_y = in->my;
     } else if (g_mode != MODE_NONE) {
-        bool held = (g_mode == MODE_PAN) ? (in->left || in->right || in->middle) : in->left;
+        bool held = (g_mode == MODE_PAN) ? (in->left || in->right || in->middle)
+                  : (g_mode == MODE_GROUP) ? in->right : in->left;
         float dx = in->mx - g_last_x, dy = in->my - g_last_y;
         if (!held) {
-            if (g_mode == MODE_CONNECT) {
+            if (g_mode == MODE_GROUP) {
+                /* A click or a twitch isn't a group -- nothing is made. */
+                float x0 = fminf(g_group_x, in->mx), y0 = fminf(g_group_y, in->my);
+                float w = fabsf(in->mx - g_group_x), h = fabsf(in->my - g_group_y);
+                if (w >= GROUP_MIN_DRAG && h >= GROUP_MIN_DRAG) {
+                    CanvasNode *n = canvas_doc_add_node(&g_doc, CNODE_GROUP);
+                    n->x = roundf((x0 - g_ox) / g_zoom);
+                    n->y = roundf((y0 - g_oy) / g_zoom);
+                    n->w = roundf(fmaxf(MIN_W, w / g_zoom));
+                    n->h = roundf(fmaxf(MIN_H, h / g_zoom));
+                    mark_dirty();
+                    select_node((int)g_doc.node_count - 1);
+                    open_editor(true);
+                }
+            } else if (g_mode == MODE_CONNECT) {
                 int target = hit_node(in->mx, in->my);
                 if (target >= 0 && target != g_mode_index && g_doc.nodes[target].type != CNODE_GROUP) {
                     const char *from_id = g_doc.nodes[g_mode_index].id;
                     const char *to_id = g_doc.nodes[target].id;
-                    /* Arrive on the target's side nearest where the drag ended. */
-                    Side to_side = facing_side(&g_doc.nodes[target], in->mx, in->my);
+                    /* No sides written: the edge reflows as its boxes
+                     * move, until it's locked in the editor. */
                     CanvasEdge *e = canvas_doc_add_edge(&g_doc);
                     e->from_node = xstrdup(from_id);
                     e->to_node = xstrdup(to_id);
-                    e->from_side = xstrdup(side_name(g_conn_side));
-                    e->to_side = xstrdup(side_name(to_side));
                     mark_dirty();
                     select_edge((int)g_doc.edge_count - 1);
                 }
@@ -1434,6 +1507,13 @@ static void draw_canvas_layer(struct nk_context *ctx, int width, int height) {
             struct nk_color col = theme_nk(g_theme.box_border_selected);
             nk_stroke_curve(c, b.ax, b.ay, b.c1x, b.c1y, b.c2x, b.c2y, b.bx, b.by, 1.5f, col);
         }
+        if (g_mode == MODE_GROUP) {
+            struct nk_rect r = nk_rect(fminf(g_group_x, g_cursor_x), fminf(g_group_y, g_cursor_y),
+                                       fabsf(g_cursor_x - g_group_x), fabsf(g_cursor_y - g_group_y));
+            float rounding = 8.0f * fminf(g_zoom, 1.5f);
+            nk_fill_rect(c, r, rounding, with_alpha(g_theme.box_border_selected, 28));
+            nk_stroke_rect(c, r, rounding, 1.5f, theme_nk(g_theme.box_border_selected));
+        }
         if (g_mode == MODE_NONE && g_hover >= 0) draw_handles(c, g_hover);
         if (g_sel == SEL_NODE && g_sel_index >= 0 && g_sel_index < (int)g_doc.node_count) {
             draw_handles(c, g_sel_index);
@@ -1447,17 +1527,16 @@ static void draw_canvas_layer(struct nk_context *ctx, int width, int height) {
             draw_text_at(c, ((float)width - w) * 0.5f, (float)height * 0.5f, hint, g_theme.canvas_edge_label);
         }
 
-        char hud[160];
+#ifdef __APPLE__
+        const char *mod = "Cmd";
+#else
+        const char *mod = "Ctrl";
+#endif
+        char hud[256];
         snprintf(hud, sizeof(hud),
                  "%.0f%%   \xC2\xB7   double-click: add / edit   \xC2\xB7   shift+click: go in / open code   "
-                 "\xC2\xB7   %s+F: search   \xC2\xB7   Esc: up",
-                 g_zoom * 100.0f,
-#ifdef __APPLE__
-                 "Cmd"
-#else
-                 "Ctrl"
-#endif
-        );
+                 "\xC2\xB7   %s+right-drag: group   \xC2\xB7   %s+F: search   \xC2\xB7   Esc: up",
+                 g_zoom * 100.0f, mod, mod);
         float fh = fonts_ui()->height;
         draw_text_at(c, 12.0f, (float)height - fh - 12.0f, hud, g_theme.canvas_edge_label);
         if (g_load_failed) {
@@ -1538,9 +1617,8 @@ static void draw_editor(struct nk_context *ctx, int width, int height, PanelRect
     CanvasNode *node = is_edge ? NULL : &g_doc.nodes[g_sel_index];
     bool weak = node && canvas_node_is_weak_link(node);
 
-    struct nk_rect initial = nk_rect((float)width - 460.0f, 60.0f, 440.0f, fmaxf((float)height - 120.0f, 300.0f));
-    if (nk_begin(ctx, EDITOR_TITLE, initial,
-                 NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE)) {
+    if (winstate_begin(ctx, EDITOR_TITLE, (float)width - 460.0f, 60.0f, 440.0f, fmaxf((float)height - 120.0f, 300.0f),
+                       NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE)) {
         struct nk_rect b = nk_window_get_bounds(ctx);
         *out = (PanelRect){ b.x, b.y, b.w, b.h };
 
@@ -1628,6 +1706,26 @@ static void draw_editor(struct nk_context *ctx, int width, int height, PanelRect
             }
         }
 
+        if (is_edge) {
+            CanvasEdge *e = &g_doc.edges[g_sel_index];
+            static const char *const names[] = { "\xE2\x86\x92", "\xE2\x86\x90", "\xE2\x86\x90 \xE2\x86\x92", "none" };
+            int cur_arrows = edge_arrows(e);
+            nk_layout_row_dynamic(ctx, 20, 1);
+            nk_label(ctx, "Arrows", NK_TEXT_LEFT);
+            nk_layout_row_dynamic(ctx, 24, 4);
+            for (int k = 0; k < 4; k++) {
+                nk_bool on = k == cur_arrows;
+                if (nk_selectable_label(ctx, names[k], NK_TEXT_CENTERED, &on) && k != cur_arrows) {
+                    set_edge_arrows(e, k);
+                }
+            }
+            nk_layout_row_dynamic(ctx, 24, 1);
+            nk_bool locked = edge_locked(e);
+            if (nk_checkbox_label(ctx, "Lock sides (don't reflow when boxes move)", &locked)) {
+                set_edge_locked(e, locked);
+            }
+        }
+
         char *link = node ? canvas_link_of(node) : NULL;
         int ndirs = node ? cached_dir_count(g_sel_index) : 0;
         nk_layout_row_dynamic(ctx, 26, 2 + (link ? 1 : 0) + (ndirs ? 1 : 0));
@@ -1660,9 +1758,8 @@ static void draw_search(struct nk_context *ctx, int width, int height, PanelRect
         *out = (PanelRect){ 0, 0, 0, 0 };
         return;
     }
-    struct nk_rect initial = nk_rect((float)width * 0.5f - 280.0f, 64.0f, 560.0f, fminf((float)height - 120.0f, 480.0f));
-    if (nk_begin(ctx, SEARCH_TITLE, initial,
-                 NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE)) {
+    if (winstate_begin(ctx, SEARCH_TITLE, (float)width * 0.5f - 280.0f, 64.0f, 560.0f, fminf((float)height - 120.0f, 480.0f),
+                       NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE)) {
         struct nk_rect b = nk_window_get_bounds(ctx);
         *out = (PanelRect){ b.x, b.y, b.w, b.h };
 

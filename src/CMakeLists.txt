@@ -79,6 +79,7 @@ add_executable(Codestellation
     render/project_build.c
     render/labels.c
     render/panel_rect.c
+    render/winstate.c
     render/theme.c
     render/fonts.c
     render/md_render.c

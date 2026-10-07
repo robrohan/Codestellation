@@ -11,6 +11,7 @@
 #include "note_compose.h"
 #include "fonts.h"
 #include "textarea.h"
+#include "winstate.h"
 #include "../common/pathutil.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -529,12 +530,12 @@ void ui_panel_draw(struct nk_context *ctx, int window_width, int window_height,
     float w = (float)UI_PANEL_WIDTH;
     /* NK_WINDOW_MOVABLE|NK_WINDOW_SCALABLE: this rect is only honored the
      * frame the window is first created (nuklear owns its position/size
-     * from then on, updated by the user's own drag/resize) -- see the
-     * plan notes on nk_begin_titled's behavior. So this is just a sane
-     * first-launch default, not a per-frame pin anymore. */
-    if (nk_begin(ctx, UI_PANEL_TITLE, nk_rect((float)window_width - w, 0, w, (float)window_height),
-                 NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
-                 NK_WINDOW_MINIMIZABLE)) {
+     * from then on, updated by the user's own drag/resize), and only until
+     * the user moves it -- winstate remembers it from then on, across
+     * canvas trips and restarts. So this is just a first-launch default. */
+    if (winstate_begin(ctx, UI_PANEL_TITLE, (float)window_width - w, 0, w, (float)window_height,
+                       NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
+                       NK_WINDOW_MINIMIZABLE)) {
         struct nk_rect b = nk_window_get_bounds(ctx);
         out_bounds->x = b.x;
         out_bounds->y = b.y;

@@ -14,6 +14,7 @@
  *   left-drag box              move it (bottom-right corner of a selected box: resize)
  *   left-drag a side dot       draw an edge to another box
  *   left-drag empty / right / middle-drag   pan
+ *   Cmd/Ctrl+right-drag        draw a group (a frame behind the boxes)
  *   click                      select a box or edge
  *   double-click box / edge    edit it in the side panel
  *   double-click empty         new box
@@ -41,6 +42,7 @@ typedef struct {
     float mx, my;            /* cursor, logical pixels */
     bool left, right, middle;
     bool shift;
+    bool ctrl;               /* Ctrl or Cmd, held at the click */
     float scroll;            /* this frame's wheel delta */
     double time;             /* glfwGetTime(), for double-clicks and save debounce */
     bool over_panel;         /* cursor is over a floating panel: ignore presses/scroll */

@@ -8,6 +8,7 @@
 #include "nuklear.h"
 
 #include "properties_panel.h"
+#include "winstate.h"
 #include "tinyfiledialogs.h"
 #include "../common/pathutil.h"
 #include <stddef.h>
@@ -19,9 +20,9 @@ PropsResult properties_panel_draw(struct nk_context *ctx, int *show_origin, bool
     *out_export_clicked = false;
 
     float h = 220.0f + (has_notes ? 30.0f : 0.0f) + (has_project ? 64.0f : 0.0f);
-    if (nk_begin(ctx, PROPERTIES_PANEL_TITLE, nk_rect(20, 20, 260, h),
-                 NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
-                 NK_WINDOW_MINIMIZABLE)) {
+    if (winstate_begin(ctx, PROPERTIES_PANEL_TITLE, 20, 20, 260, h,
+                       NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
+                       NK_WINDOW_MINIMIZABLE)) {
         struct nk_rect b = nk_window_get_bounds(ctx);
         out_bounds->x = b.x;
         out_bounds->y = b.y;

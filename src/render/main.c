@@ -36,6 +36,7 @@
 #include "theme.h"
 #include "fonts.h"
 #include "canvas_view.h"
+#include "winstate.h"
 #include "../canvas/project.h"
 #include "../canvas/export.h"
 #include "panel_rect.h"
@@ -689,6 +690,7 @@ int main(int argc, char **argv) {
                 .right = right_state == GLFW_PRESS,
                 .middle = middle_state == GLFW_PRESS,
                 .shift = (g_press_mods & GLFW_MOD_SHIFT) != 0, /* held at the click, see g_press_mods */
+                .ctrl = (g_press_mods & (GLFW_MOD_CONTROL | GLFW_MOD_SUPER)) != 0,
                 .scroll = scroll_y,
                 .time = glfwGetTime(),
                 .over_panel = over_panel,
@@ -725,6 +727,7 @@ int main(int argc, char **argv) {
 
         PropsResult props = { PROPS_NONE, NULL, NULL };
         bool export_notes_clicked = false;
+        winstate_set_screen(width, height);
         {
             const char *sel_path = selected >= 0 ? lg.graph.nodes[selected].path : NULL;
             const char *sel_lang = selected >= 0 ? lg.graph.nodes[selected].language : NULL;
