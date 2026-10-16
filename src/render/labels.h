@@ -9,6 +9,7 @@ struct nk_context;
 #include "panel_rect.h"
 #include "../graph/graph.h"
 #include "../notes/notes.h"
+#include "../common/cost.h"
 
 /* Draws each node's filename (not full path) floating just above its
  * projected screen position -- a transparent full-window Nuklear overlay
@@ -25,11 +26,20 @@ struct nk_context;
  * the view in unreadable text and overflows Nuklear's vertex buffer
  * (which silently truncates *everything* in that draw, panels included).
  * `selected` (or -1) is always labelled regardless of that cap, as is any
- * noted node. */
+ * noted node.
+ *
+ * Markers, drawn whether or not the node gets a label: an outline around
+ * the LABELS_TOP_MARKED files with the highest complexity, and the
+ * currency sign beside the LABELS_TOP_MARKED most valuable files (priced
+ * with `cost`, see common/cost.h). sizes are the nodes' point sizes in
+ * framebuffer pixels (nodestyle.h); point_scale is framebuffer pixels per
+ * window pixel, to size the outline to the square. */
+#define LABELS_TOP_MARKED 3
+
 void labels_draw(struct nk_context *ctx, int window_width, int window_height,
                   PanelRect inspector_bounds, PanelRect note_bounds, PanelRect properties_bounds,
-                  const float *view_proj, const Vec3 *positions, const Graph *g, const NoteSet *notes,
-                  int selected);
+                  const float *view_proj, const Vec3 *positions, const float *sizes, float point_scale,
+                  const Graph *g, const NoteSet *notes, const CostParams *cost, int selected);
 
 #define LABELS_MAX_VISIBLE 200
 

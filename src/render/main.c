@@ -776,8 +776,11 @@ int main(int argc, char **argv) {
             /* In code view this draws just the breadcrumb bar, over the 3D. */
             canvas_view_draw(ctx, width, height, cost, &canvas_panels);
             if (!canvas_mode) {
+                int fb_w, fb_h;
+                glfwGetFramebufferSize(win, &fb_w, &fb_h);
                 labels_draw(ctx, width, height, inspector_bounds, note_bounds, properties_bounds,
-                            view_proj, lg.positions, &lg.graph, &lg.notes, selected);
+                            view_proj, lg.positions, lg.sizes, width > 0 ? (float)fb_w / (float)width : 1.0f,
+                            &lg.graph, &lg.notes, cost, selected);
             }
 
             if (build) {

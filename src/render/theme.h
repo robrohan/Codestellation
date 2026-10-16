@@ -29,6 +29,7 @@ typedef struct {
     ThemeColor note_dot;
     ThemeColor complexity_marker; /* ring around a complex function's line (textarea.c) */
     ThemeColor duplicate_marker;  /* bar beside lines copied elsewhere in the project (textarea.c) */
+    ThemeColor cost_marker;       /* "$" beside the most expensive files in 3D (labels.c) */
 
     /* 2D canvas (canvas_view.c, md_render.c) */
     ThemeColor canvas_background;
