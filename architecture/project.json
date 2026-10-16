@@ -2,5 +2,15 @@
   "title": "Codestellation",
   "description": "Native C desktop app: nested JSON Canvas system maps above a tree-sitter-built 3D dependency explorer.",
   "root": "root.canvas",
-  "created": "2026-10-03T05:14:39Z"
+  "created": "2026-10-03T05:14:39Z",
+  "cost": {
+    "currency": "$",
+    "salary": 100000,
+    "overhead": 2.5,
+    "mode": "organic",
+    "ai_share": 0,
+    "token_price": 10,
+    "reasoning_multiplier": 300,
+    "chars_per_token": 4
+  }
 }

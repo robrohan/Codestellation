@@ -14,12 +14,41 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+/* COCOMO settings for the open project. true if any changed this frame. */
+static bool draw_cost_settings(struct nk_context *ctx, CostParams *cost) {
+    CostParams before = *cost;
+    static const char *modes[COCOMO_MODE_COUNT] = { "Organic", "Semi-detached", "Embedded" };
+
+    nk_layout_row_dynamic(ctx, 20, 1);
+    nk_label(ctx, "Cost estimate (COCOMO)", NK_TEXT_LEFT);
+    nk_layout_row_dynamic(ctx, 24, 1);
+    /* Drag steps: $100 per pixel, 0.01 overhead per pixel. */
+    nk_property_double(ctx, "#Salary/year:", 0.0, &cost->salary, 10000000.0, 1000.0, 100.0f);
+    nk_property_double(ctx, "#Overhead x:", 0.1, &cost->overhead, 10.0, 0.1, 0.01f);
+    cost->mode = (CocomoMode)nk_combo(ctx, modes, COCOMO_MODE_COUNT, (int)cost->mode, 24, nk_vec2(200, 100));
+
+    nk_layout_row_dynamic(ctx, 20, 1);
+    nk_label(ctx, "If written by AI", NK_TEXT_LEFT);
+    nk_layout_row_dynamic(ctx, 24, 1);
+    double share = cost->ai_share * 100.0;
+    nk_property_double(ctx, "#AI share %:", 0.0, &share, 100.0, 5.0, 0.5f);
+    cost->ai_share = share / 100.0;
+    nk_property_double(ctx, "#Price/M tokens:", 0.0, &cost->token_price, 1000.0, 0.5, 0.05f);
+    nk_property_double(ctx, "#Reasoning x:", 1.0, &cost->reasoning_multiplier, 100000.0, 10.0, 1.0f);
+
+    return before.salary != cost->salary || before.overhead != cost->overhead || before.mode != cost->mode ||
+           before.ai_share != cost->ai_share || before.token_price != cost->token_price ||
+           before.reasoning_multiplier != cost->reasoning_multiplier;
+}
+
 PropsResult properties_panel_draw(struct nk_context *ctx, int *show_origin, bool has_notes, bool has_project,
-                                  bool *out_export_clicked, PanelRect *out_bounds) {
+                                  CostParams *cost, bool *out_cost_changed, bool *out_export_clicked,
+                                  PanelRect *out_bounds) {
     PropsResult result = { PROPS_NONE, NULL, NULL };
     *out_export_clicked = false;
+    *out_cost_changed = false;
 
-    float h = 220.0f + (has_notes ? 30.0f : 0.0f) + (has_project ? 64.0f : 0.0f);
+    float h = 220.0f + (has_notes ? 30.0f : 0.0f) + (has_project ? 64.0f : 0.0f) + (cost ? 228.0f : 0.0f);
     if (winstate_begin(ctx, PROPERTIES_PANEL_TITLE, 20, 20, 260, h,
                        NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
                        NK_WINDOW_MINIMIZABLE)) {
@@ -79,6 +108,7 @@ PropsResult properties_panel_draw(struct nk_context *ctx, int *show_origin, bool
             if (nk_button_label(ctx, "Export Manual...")) result.action = PROPS_EXPORT_MANUAL;
             if (nk_button_label(ctx, "Export LLM Brief...")) result.action = PROPS_EXPORT_LLM;
         }
+        if (cost) *out_cost_changed = draw_cost_settings(ctx, cost);
 
         nk_layout_row_dynamic(ctx, 24, 1);
         nk_checkbox_label(ctx, "Show origin", show_origin);

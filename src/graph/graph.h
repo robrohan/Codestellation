@@ -17,6 +17,7 @@ typedef struct {
 
     /* From the file text and its syntax tree -- every language. */
     int lines, blank_lines, comment_lines;
+    int chars;        /* file size in bytes; -1 in a graph.json from before it was counted */
     int max_indent;   /* deepest indentation, in the file's own indent steps */
     int parse_errors; /* ERROR + MISSING nodes in the syntax tree */
 

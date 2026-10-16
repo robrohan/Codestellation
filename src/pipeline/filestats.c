@@ -126,6 +126,7 @@ void filestats_compute(const ParsedFile *file, const LanguageAdapter *adapter, N
     const char *src = file->source;
     uint32_t len = file->source_len;
     out->has_stats = true;
+    out->chars = (int)len;
 
     uint32_t line_count = 0;
     uint32_t *starts = line_starts(src, len, &line_count);
