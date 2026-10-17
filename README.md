@@ -22,15 +22,15 @@
 
 ## What is Codestellation
 
-Codestellation helps you map or construct a system using hierarchical abstractions. It is built for digging through unfamiliar, legacy, or "vibe coded" multi-language codebases, as well as starting fresh designs and working through what you are trying to build. The latest verison also does cost estimations base on the linked code.
+Codestellation helps you map out (or construct) a system using hierarchical abstractions. It is built for digging through unfamiliar, legacy, or "vibe coded" multi-language codebases, as well as starting fresh designs and working through what you are trying to build. The latest verison also does cost estimations based on the linked code.
 
-The canvas view is for multi-level system diagrams. Draw boxes for servers, services, databases, regions, or whatever your system is made of, connect them with labelled lines, and nest them as deep as you like: shift+click a box to go "into it" and diagram what's inside the box.
+The canvas view is for multi-level system diagrams. Draw boxes for servers, services, databases, regions, or whatever your system is made of, connect them with labelled lines, and nest them as deep as you like: shift+click a box to go "into it" and diagram _what's in the box_.
 
-You can use a structure like the [C4 model](https://c4model.com) (context, containers, components, code) or make up your own levels. At the node of any diagram, a box can point at folders of source code, which opens them in the 3D code view so you can comment and see the source structure. It uses a 3D view, because 2D can sometimes [be impossible to navigate](https://www.youtube.com/watch?v=92kcm3b-Q_s).
+You can use a structure like the [C4 model](https://c4model.com) (context, containers, components, code) or make up your own levels. At the leaf of any diagram, a box can point at folders of source code, which opens them in a 3D code view so you can comment on and see the source's structure. It uses a 3D view, because 2D can sometimes [be impossible to navigate](https://www.youtube.com/watch?v=92kcm3b-Q_s).
 
-Every 2D box can have markdown notes, and every file can have notes attached to the overall file or a specific line. The whole project can exported as a single document to aid in writing a design document or to feed to an LLM to build your creation.
+Every 2D box can have markdown notes, and every file can have notes attached to the overall file or a specific line. The whole project can be exported as a single document to aid in writing a design document or to feed to an LLM to build your creation.
 
-The codestellation view walks a codebase, extracts cross-file dependencies with tree-sitter, and renders them as an interactive 3D graph using OpenGL + Nuklear. The formats used are [JSON Canvas](https://jsoncanvas.org) for the 2D box view (the same format Obsidian uses), and the graph files are saved as [NetworkX Node-Link JSON schema](https://networkx.org/en/).
+The codestellation view walks a codebase and extracts cross-file dependencies with tree-sitter. It renders the folders as an interactive 3D graph using OpenGL + Nuklear. The formats used are [JSON Canvas](https://jsoncanvas.org) for the 2D box view (the same format Obsidian uses), and the graph files are saved as [NetworkX Node-Link JSON schema](https://networkx.org/en/).
 
 ## Supported languages
 
@@ -113,13 +113,15 @@ python3 scripts/sanity_check.py graph.json
 
 ## Cost Estimates
 
-Codestellation prices code in two ways, as rough guides to what it would cost to produce, and as if an AI wrote the code. These values should be taken with care. The costing models that are being used are not for quotes, but were created in the 1980-1990s in larger corporations. The mix of the human model and the AI token model show a third figure, the **value**, which blends the two by how much of the code was AI written - again, take these values with a grain of salt.
+Codestellation prices code in two ways, as rough guides to what it would cost a team of humans to produce, and as if an AI was prompted to write the code. These values should be considered ballpark figures. The costing models used are not for doing quotes. They were created in the 1980s in larger corporations, but at least it's something.
 
-Only code lines are used in the calculation. Lines that are blank or comment-only are ignored. As are Markdown and JSON files.
+The mix of the human model and the AI token model leads to a third figure, the **value**, which blends the two by how much of the code was written by AI vs. written by human. Again, take these values with a grain of salt.
+
+Only code lines are used in the calculation. Lines that are blank or only comments are ignored. As are Markdown and JSON files.
 
 ### Humans: COCOMO
 
-Based on the Basic COCOMO (Boehm, 1981). We are using the same model and defaults as [scc](https://github.com/boyter/scc) and sloccount:
+Based on the [Basic COCOMO (Boehm, 1981)](https://link.springer.com/article/10.1007/BF02249046). We are using the same model and defaults as [scc](https://github.com/boyter/scc) and sloccount:
 
 ```
 effort   = a × KSLOC^b          person-months
@@ -128,7 +130,7 @@ people   = effort ÷ schedule
 cost     = effort × (salary ÷ 12) × overhead
 ```
 
-It's often helpful to look up a senior developer salary in your area for the base file of one person, and the overhead value multiplies salary up to what a developer really costs: benefits, taxes, office, equipment, management. 1.0 is salary only (contractors for example), about 1.3-1.5 is typical in-house staff. The default, 2.4, is fully loaded.
+It's often helpful to look up a senior developer salary in your area for the base salary of one person, and the **overhead** is a multiplier to the salary that should bring the value up to what a developer actually costs: benefits, taxes, office, equipment, management. 1.0 is salary only (contractors for example), about 1.3-1.5 is typical in-house staff. The default, 2.4, is fully loaded developer.
 
 The mode setting controls some parameters that should match your environment:
 
@@ -138,7 +140,7 @@ The mode setting controls some parameters that should match your environment:
 | semi-detached | 3.0 | 1.12 | 2.5 | 0.35 | in between |
 | embedded | 3.6 | 1.20 | 2.5 | 0.32 | tight hardware, process or regulatory constraints |
 
-The _Person-months_ value show how much work the code represents for a typical team of the kind the model was calibrated on, including design, testing and coordination. It isn't how long it actually took. One person working with modern tools will usually beat it, so read it as an upper bound for solo hand written code. Don't fall into the "if it takes one woman 9 months to make a baby, then it should take 9 women one month" trap.
+The _Person-months_ value show how much work the code represents for a typical team of the kind the model was calibrated on, including design, testing and coordination. It isn't how long it actually took. One person working with modern tools will usually beat the estimated time, so read it as an upper bound for solo hand written code. Don't fall into the "if it takes one woman 9 months to make a baby, then it should take 9 women one month" trap.
 
 ### AI: Tokens
 
@@ -151,7 +153,7 @@ tokens spent = tokens kept × multiplier
 cost         = tokens spent ÷ 1,000,000 × token_price
 ```
 
-The token count in the finished code are only a floor. Using AI to produce code means reading context, reasoning, tool calling that doesn't get counted by just estimating the number of tokens in the code (which is just a guess anyway); the **reasoning multiplier** stands for all of that. Its default of 300 which is a best guess (about 3¢ a line at the default price). Two factors to can change the value:
+The token count in the finished code are only a floor. Using AI to produce code means reading context, reasoning, and tool calling. Those values don't get counted by just estimating the number of tokens in the code (which is just a guess anyway); the **reasoning multiplier** stands for all of that. Its default of 300 which is a best guess (about 3¢ a line at the default price). Two factors to can change the value:
 
 - **Complexity factor**: decision points per code line, against a typical 0.2 (roughly the median across a spread of real projects), clamped to 0.5x–2x. Code that branches more often takes more reasoning per line. Files in languages without complexity count as typical.
 - **Size factor**: `1 + 0.5 × log10(KSLOC)`, at least 1: 1x at 1k lines, 1.5x at 10k, 2x at 100k. Longer code means more context to read for each change.
