@@ -5,10 +5,10 @@
   "created": "2026-10-03T05:14:39Z",
   "cost": {
     "currency": "$",
-    "salary": 130000,
-    "overhead": 2.5,
+    "salary": 100000,
+    "overhead": 2.40999999955296,
     "mode": "organic",
-    "ai_share": 0,
+    "ai_share": 0.6,
     "token_price": 10,
     "reasoning_multiplier": 300,
     "chars_per_token": 4
