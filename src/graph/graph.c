@@ -7,6 +7,7 @@ void node_stats_init(NodeStats *s) {
     memset(s, 0, sizeof(*s));
     s->complexity = s->functions = s->max_function_complexity = -1;
     s->blast_radius = -1;
+    s->chars = -1;
     s->cycle_id = -1;
     s->git_commits = s->git_authors = -1;
 }

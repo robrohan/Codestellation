@@ -180,8 +180,10 @@ Every change saves to the `.canvas` file automatically.
 **Export.** With a project open, Properties > Export Manual... writes the
 whole system map as one Markdown document: each canvas a section, each box a
 subsection, groups nesting their boxes, edges listed as connections, and for
-boxes with folder links a code summary (languages, file counts, most
-depended-on files) plus your notes on the code. Export LLM Brief... writes
+boxes with folder links a code summary (languages, file counts, size and
+cost, most depended-on files) plus your notes on the code. It opens with an
+"Estimated cost" section for all the code behind the map (see
+[Cost estimates](#cost-estimates)). Export LLM Brief... writes
 the same content framed as context for an AI assistant, with every
 component's full breadcrumb path in its heading.
 
@@ -209,6 +211,8 @@ over 1 MB are skipped as generated.
 selected file:
 
 - **Lines**, blank lines, and lines with comments on them.
+- **Code lines**, and what they're worth **by hand**, **by AI** and as a
+  blended **value** (see [Cost estimates](#cost-estimates)).
 - **Indentation**: the deepest indent, in the file's own indent steps. It
   works in any language and stands in for nesting depth.
 - **Complexity**: decision points + 1 (`if`, loops, `case`, `catch`, `?:`,
@@ -229,11 +233,149 @@ selected file:
 Stats are worked out when the graph is built, so a `graph.json` from an
 older build shows a note to reopen the folder instead.
 
+With nothing selected, the Inspector shows an **Overview** of the whole
+graph: file and dependency counts and the cost of all its code. Select
+several files (Cmd/Ctrl+right-click) to see their combined cost.
+
 Optional sanity check of a built graph (needs networkx), pointed at the
 cached `graph.json` in the project's Application Support folder:
 ```
 python3 scripts/sanity_check.py graph.json
 ```
+
+## Cost estimates
+
+Codestellation prices code two ways, as rough guides to what it would cost
+to produce, not quotes: as if people wrote it by hand, and as if an AI did.
+A third figure, the **value**, blends the two by how much of the code was
+AI-written.
+
+Only code lines count: lines that aren't blank or comment-only, in files
+that aren't Markdown or JSON.
+
+### By hand: COCOMO
+
+Basic COCOMO (Boehm, 1981), the same model and defaults as
+[scc](https://github.com/boyter/scc) and sloccount:
+
+```
+effort   = a × KSLOC^b          person-months
+schedule = c × effort^d         months
+people   = effort ÷ schedule
+cost     = effort × (salary ÷ 12) × overhead
+```
+
+| Mode | a | b | c | d | For |
+|---|---|---|---|---|---|
+| organic (default) | 2.4 | 1.05 | 2.5 | 0.38 | small teams on familiar problems |
+| semi-detached | 3.0 | 1.12 | 2.5 | 0.35 | in between |
+| embedded | 3.6 | 1.20 | 2.5 | 0.32 | tight hardware, process or regulatory constraints |
+
+*Overhead* multiplies salary up to what a developer really costs: benefits,
+taxes, office, equipment, management. 1.0 is salary only (contractors whose
+rate already covers it), about 1.3–1.5 is typical in-house staff, and the
+default 2.4 is fully loaded.
+
+Person-months measure how much work the code represents for a typical team
+of the kind the model was calibrated on, including design, testing and
+coordination. They aren't how long it actually took: one person working
+with modern tools will usually beat it, so read it as an upper bound for
+solo hand-written code.
+
+### By AI: tokens
+
+A separate calculation; it doesn't scale the COCOMO figure:
+
+```
+tokens kept  = characters ÷ chars_per_token
+multiplier   = reasoning_multiplier × complexity factor × size factor
+tokens spent = tokens kept × multiplier
+cost         = tokens spent ÷ 1,000,000 × token_price
+```
+
+The tokens in the finished code are only a floor. Producing it means
+reading context, reasoning, and writing code that gets thrown away, and the
+**reasoning multiplier** stands for all of that. Its default of 300 is a
+best guess (about 3¢ a line at the default price); tune it to what you've
+seen. Two factors scale it:
+
+- **Complexity factor**: decision points per code line, against a typical
+  0.2 (roughly the median across a spread of real projects), clamped to
+  0.5×–2×. Code that branches more takes more reasoning per line. Files in
+  languages without complexity count as typical.
+- **Size factor**: `1 + 0.5 × log10(KSLOC)`, at least 1: 1× at 1k lines,
+  1.5× at 10k, 2× at 100k. Bigger code means more context to read for
+  each change.
+
+The default price, $10 per million tokens, is Claude Sonnet 5.5's output
+rate as of October 2026. Most tokens an agent spends are cheaper input and
+cache reads, which the multiplier absorbs.
+
+### Value
+
+```
+value = COCOMO cost of the hand-written lines + ai_share × AI cost
+```
+
+where the hand-written lines are `(1 − ai_share) × code lines`. At 0% AI the
+value is the by-hand cost. Hand-written code costs so much more that even a
+small human share dominates the blend.
+
+### Groups don't add up
+
+Both models grow faster than the code does, so a set of files is priced by
+adding up its lines, characters and complexity and estimating once, never by
+adding per-file estimates. One file's cost is a rough indication of what that
+piece is worth, not a project estimate.
+
+### Where costs show
+
+- **Inspector**: per file in Stats; for several selected files; for the
+  whole graph in the Overview when nothing is selected.
+- **Canvas**: each box with code behind it shows its lines and value in its
+  bottom-right corner. That covers the box's own folders plus everything on
+  the canvases it links to, all the way down. A line at the bottom gives the
+  whole canvas: by hand, by AI, and the value once the AI share is above 0.
+  Each file counts once, however many boxes reach it. Code that hasn't been
+  opened in 3D yet has no built graph to count, so it's left out and the
+  line says how many links that was.
+- **Export**: an "Estimated cost" section for the whole map, and a Size line
+  in each box's code summary.
+
+### Settings
+
+They live in the project's `project.json`, under `cost`:
+
+```json
+"cost": {
+  "currency": "$",
+  "salary": 56286,
+  "overhead": 2.4,
+  "mode": "organic",
+  "ai_share": 0,
+  "token_price": 10,
+  "reasoning_multiplier": 300,
+  "chars_per_token": 4
+}
+```
+
+| Key | Meaning | Default |
+|---|---|---|
+| `currency` | Prefix for amounts, e.g. `"€"` or `"EUR "` | `"$"` |
+| `salary` | Per developer per year | 56286 |
+| `overhead` | Multiplier on salary | 2.4 |
+| `mode` | `organic`, `semi-detached` or `embedded` | `organic` |
+| `ai_share` | Fraction of the code written by AI, 0–1 | 0 |
+| `token_price` | Per million tokens | 10 |
+| `reasoning_multiplier` | Tokens spent per token kept, before scaling | 300 |
+| `chars_per_token` | Characters per token | 4 |
+
+Everything except `currency` and `chars_per_token` can also be changed in
+the Properties panel while a project is open. Changes are saved back to
+`project.json`, which rewrites the file with only the keys the app knows.
+New projects get the block with defaults. Older projects use the defaults
+until a setting is changed. Opening a plain folder (no project) always uses
+the defaults.
 
 ## graph.json schema
 
@@ -251,13 +393,14 @@ networkx "node-link" format:
 ```
 
 Each node also carries the file stats: `lines`, `blank_lines`,
-`comment_lines`, `max_indent`, `parse_errors`, `complexity`, `functions`,
+`comment_lines`, `chars` (file size in bytes, for the AI cost), `max_indent`, `parse_errors`, `complexity`, `functions`,
 `max_function_complexity`, `fan_in`, `fan_out`, `blast_radius`, `cycle_id`
 (files sharing one form a cycle), `cycle_size`, `unresolved`,
 `git_commits`, `git_authors`, `git_last_commit` (unix seconds),
 `hotspot_rank`, and `hot_functions` (`[{"line", "complexity", "name"}]`,
 the most complex functions first). A key that doesn't apply is left out, e.g. no `complexity`
-for JSON and no `git_*` outside a repo. See `NodeStats` in `src/graph/graph.h`.
+for JSON and no `git_*` outside a repo. A graph built before `chars` existed
+gets it estimated at 32 characters per line. See `NodeStats` in `src/graph/graph.h`.
 
 `clones` lists duplicated code: lines `a_line`-`a_end` of node `a` match
 lines `b_line`-`b_end` of node `b` (1-based, inclusive; `a` and `b` can be

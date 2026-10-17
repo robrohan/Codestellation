@@ -9,8 +9,12 @@
  * parent), each box a subsection with its markdown, groups nesting the
  * boxes inside them, edges listed as connections, weak links as
  * references. Boxes with folder links get a code summary from that folder
- * set's cached graph (languages, file count, most-depended-on files) plus
- * any file/group notes -- or a line saying it hasn't been built yet.
+ * set's cached graph (languages, file count, size and estimated cost,
+ * most-depended-on files) plus any file/group notes -- or a line saying it
+ * hasn't been built yet. Before the first section, an "Estimated cost"
+ * section prices all the code reachable from the root canvas by hand, by
+ * AI and blended, with the project's cost settings (common/cost.h,
+ * canvas/canvas_cost.h).
  *
  * EXPORT_MANUAL reads as documentation. EXPORT_LLM is the same content
  * framed as context for a language model: a preface explaining the

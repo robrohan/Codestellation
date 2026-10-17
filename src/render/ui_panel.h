@@ -5,6 +5,7 @@
 #include "panel_rect.h"
 #include "../notes/notes.h"
 #include "../graph/graph.h"
+#include "../common/cost.h"
 
 /* Forward-declared rather than including nuklear.h here: Nuklear's
  * NK_INCLUDE_* feature macros affect struct layout, so every TU that
@@ -31,10 +32,16 @@ struct nk_context;
  * graph.h); `graph` is also scanned for the other files in its cycle and
  * for the hotspot ranking's size.
  *
- * Group mode (cluster_count > 1): cluster_paths/cluster_count instead
- * describe a multi-file selection; the panel shows that path list and a
- * Notes list for group notes covering exactly that set of files, plus
+ * With nothing selected it shows an Overview of the whole graph: file
+ * count and the estimated cost of all its code.
+ *
+ * Group mode (cluster_count > 1): cluster_ids/cluster_paths/cluster_count
+ * instead describe a multi-file selection (ids index graph->nodes); the
+ * panel shows that path list, the selection's combined size and cost, and
+ * a Notes list for group notes covering exactly that set of files, plus
  * "+ Add group note". selected_path/selected_language are ignored here.
+ *
+ * Costs are COCOMO estimates priced with `cost` (common/cost.h).
  *
  * notes is reloaded in place (see notes.h) by any edit/delete the user
  * performs here (adding happens in the Note pane instead); notes_md_path
@@ -43,8 +50,8 @@ struct nk_context;
 void ui_panel_draw(struct nk_context *ctx, int window_width, int window_height,
                     const Graph *graph, int selected,
                     const char *selected_path, const char *selected_language,
-                    const char **cluster_paths, size_t cluster_count,
-                    NoteSet *notes, const char *notes_md_path,
+                    const unsigned int *cluster_ids, const char **cluster_paths, size_t cluster_count,
+                    const CostParams *cost, NoteSet *notes, const char *notes_md_path,
                     PanelRect *out_bounds);
 
 void ui_panel_shutdown(void);

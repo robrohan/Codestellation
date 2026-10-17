@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include "panel_rect.h"
+#include "../common/cost.h"
 
 /* Forward-declared rather than including nuklear.h -- see ui_panel.h. */
 struct nk_context;
@@ -49,8 +50,14 @@ typedef struct {
     char *title;
 } PropsResult;
 
-/* has_project: a system-map project is open, which adds its export buttons. */
+/* has_project: a system-map project is open, which adds its export buttons.
+ * cost: that project's cost settings, edited in place (salary, overhead,
+ * mode, AI share, token price, reasoning multiplier -- the currency and
+ * characters per token are only set in project.json); NULL hides them.
+ * *out_cost_changed is true the frames they change, so the caller can
+ * save them. */
 PropsResult properties_panel_draw(struct nk_context *ctx, int *show_origin, bool has_notes, bool has_project,
-                                  bool *out_export_clicked, PanelRect *out_bounds);
+                                  CostParams *cost, bool *out_cost_changed, bool *out_export_clicked,
+                                  PanelRect *out_bounds);
 
 #endif

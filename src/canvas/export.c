@@ -1,5 +1,7 @@
 #include "export.h"
 #include "canvas_doc.h"
+#include "canvas_cost.h"
+#include "../common/cost.h"
 #include "../common/code_cache.h"
 #include "../common/pathutil.h"
 #include "../graph/graph.h"
@@ -197,6 +199,24 @@ static void write_code_summary(Exporter *x, char *const *raw_dirs, size_t count)
     for (int k = 0; k < nlangs; k++) fprintf(x->f, "%s%s (%d)", k ? ", " : "", langs[k], lang_counts[k]);
     fputc('\n', x->f);
 
+    CodeTotals code = { 0 };
+    for (size_t i = 0; i < g.node_count; i++) code_totals_add(&code, &g.nodes[i].stats, g.nodes[i].language);
+    if (code.sloc > 0) {
+        const CostParams *cp = &x->project->cost;
+        CostEstimate e = cost_estimate(code.sloc, cp);
+        char hand[32], ai[32];
+        cost_format_money(e.cost, cp->currency, hand, sizeof(hand));
+        cost_format_money(cost_estimate_ai(&code, cp).cost, cp->currency, ai, sizeof(ai));
+        fprintf(x->f, "- Size: %lld lines of code in %d %s; ~%s to write by hand (%.1f person-months), ~%s by AI",
+                code.sloc, code.files, code.files == 1 ? "file" : "files", hand, e.effort_months, ai);
+        if (cp->ai_share > 0.0) {
+            char value[32];
+            cost_format_money(cost_value(&code, cp), cp->currency, value, sizeof(value));
+            fprintf(x->f, "; ~%s at %.0f%% AI", value, cp->ai_share * 100.0);
+        }
+        fputc('\n', x->f);
+    }
+
     /* Most depended-on files: highest in-degree. Edge endpoints are node
      * ids, which equal node indices in a graph.json this app wrote. */
     int *indeg = (int *)calloc(g.node_count ? g.node_count : 1, sizeof(int));
@@ -353,6 +373,49 @@ static void weak_link_description(const CanvasNode *n, const char *canvas_path, 
 
 static void export_canvas(Exporter *x, const char *path, const char *title, int depth);
 
+/* The whole map's code priced as one body (canvas_cost.h), up front. */
+static void write_cost_overview(Exporter *x) {
+    const CostParams *cp = &x->project->cost;
+    CodeSize size = canvas_cost_canvas(x->project->root_path);
+    const CodeTotals *code = &size.code;
+    if (code->sloc <= 0 && size.unbuilt == 0) return;
+
+    heading(x, 2, "Estimated cost");
+    if (code->sloc > 0) {
+        CostEstimate e = cost_estimate(code->sloc, cp);
+        AiEstimate ai = cost_estimate_ai(code, cp);
+        char hand[32], ai_cost[32], value[32], salary[32], kept[32], spent[32];
+        cost_format_money(e.cost, cp->currency, hand, sizeof(hand));
+        cost_format_money(ai.cost, cp->currency, ai_cost, sizeof(ai_cost));
+        cost_format_money(cost_value(code, cp), cp->currency, value, sizeof(value));
+        cost_format_money(cp->salary, cp->currency, salary, sizeof(salary));
+        cost_format_count(ai.tokens_kept, kept, sizeof(kept));
+        cost_format_count(ai.tokens_spent, spent, sizeof(spent));
+
+        fprintf(x->f, "All code linked from this map: %lld lines in %d %s.\n\n", code->sloc, code->files,
+                code->files == 1 ? "file" : "files");
+        fprintf(x->f, "- **Value: ~%s** (%.0f%% written by AI)\n", value, cp->ai_share * 100.0);
+        fprintf(x->f, "- Written by hand: ~%s, %.1f person-months, %.1f months with %.1f people\n", hand,
+                e.effort_months, e.schedule_months, e.people);
+        fprintf(x->f, "- Written by AI: ~%s, %s tokens spent (%s kept x %.0f)\n\n", ai_cost, spent, kept,
+                ai.multiplier);
+        fprintf(x->f,
+                "_By hand is Basic COCOMO (%s) at %s a year per developer with %.2gx overhead. By AI is tokens: "
+                "characters / %g per token, times a reasoning multiplier of %g scaled for complexity and size, at "
+                "%s%g per million tokens. Value prices the hand-written share with COCOMO and the rest with tokens. "
+                "Rough guides to what the code would cost to produce, not quotes. Blank lines, comments, Markdown "
+                "and JSON aren't counted as code lines._\n\n",
+                cocomo_mode_name(cp->mode), salary, cp->overhead, cp->chars_per_token, cp->reasoning_multiplier,
+                cp->currency, cp->token_price);
+    } else {
+        fputs("No code counted yet.\n\n", x->f);
+    }
+    if (size.unbuilt > 0) {
+        fprintf(x->f, "_%d code %s not been opened in Codestellation yet, so %s not counted._\n\n", size.unbuilt,
+                size.unbuilt == 1 ? "link has" : "links have", size.unbuilt == 1 ? "its code is" : "their code is");
+    }
+}
+
 static void write_box(Exporter *x, const CanvasDoc *doc, const CanvasNode *n, const char *canvas_path, int level) {
     (void)doc;
     char title[128], heading_text[512];
@@ -493,7 +556,8 @@ bool export_project(const Project *p, ExportStyle style, const char *out_path) {
               "path from the top level. \"Connections\" lists how components talk to each other. \"Code\" "
               "summarises the source folders behind a component, with notes the author made on specific files "
               "and lines. A \"Reference\" is a component that lives in another section, shown here because "
-              "something connects to it.\n\n", f);
+              "something connects to it. \"Estimated cost\" prices all the code behind the map as if written by "
+              "hand (the COCOMO model) and by AI (tokens), and blends the two by how much was AI-written.\n\n", f);
         if (p->description && *p->description) fprintf(f, "%s\n\n", p->description);
     } else {
         char date[32];
@@ -504,6 +568,7 @@ bool export_project(const Project *p, ExportStyle style, const char *out_path) {
         fprintf(f, "_Generated by Codestellation on %s._\n\n", date);
     }
 
+    write_cost_overview(&x);
     export_canvas(&x, p->root_path, style == EXPORT_LLM ? "Top level" : "Overview", 0);
 
     for (size_t i = 0; i < x.visited_count; i++) free(x.visited[i]);

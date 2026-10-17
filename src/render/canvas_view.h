@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "panel_rect.h"
+#include "../common/cost.h"
 
 /* The system-map canvas: a stack of JSON Canvas files (see
  * canvas/canvas_doc.h), rooted at a project's root canvas, drawn as boxes
@@ -90,7 +91,9 @@ typedef struct {
 
 /* Draws the canvas into a full-window background layer, plus the
  * breadcrumb bar and (when open) the editor and search panels. In code
- * mode only the breadcrumb bar is drawn. */
-void canvas_view_draw(struct nk_context *ctx, int width, int height, CanvasPanels *out);
+ * mode only the breadcrumb bar is drawn. Boxes with code behind them show
+ * its size and estimated cost, priced with `cost`, and so does the whole
+ * canvas (canvas/canvas_cost.h). */
+void canvas_view_draw(struct nk_context *ctx, int width, int height, const CostParams *cost, CanvasPanels *out);
 
 #endif

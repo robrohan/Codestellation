@@ -33,6 +33,7 @@ static const struct {
     { "lines", offsetof(NodeStats, lines) },
     { "blank_lines", offsetof(NodeStats, blank_lines) },
     { "comment_lines", offsetof(NodeStats, comment_lines) },
+    { "chars", offsetof(NodeStats, chars) },
     { "max_indent", offsetof(NodeStats, max_indent) },
     { "parse_errors", offsetof(NodeStats, parse_errors) },
     { "complexity", offsetof(NodeStats, complexity) },

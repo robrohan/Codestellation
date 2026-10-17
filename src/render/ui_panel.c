@@ -13,6 +13,7 @@
 #include "textarea.h"
 #include "winstate.h"
 #include "../common/pathutil.h"
+#include "../common/cost.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -134,7 +135,10 @@ static void draw_note_row(struct nk_context *ctx, const Note *note, const Note *
     }
 }
 
-static void draw_group_mode(struct nk_context *ctx, const char **cluster_paths, size_t cluster_count,
+static void draw_cost_summary(struct nk_context *ctx, const CodeTotals *code, const CostParams *cost);
+
+static void draw_group_mode(struct nk_context *ctx, const Graph *graph, const unsigned int *cluster_ids,
+                             const char **cluster_paths, size_t cluster_count, const CostParams *cost,
                              NoteSet *notes, const char *notes_md_path) {
     char context[512];
     snprintf(context, sizeof(context), "group:%zu:%s", cluster_count,
@@ -152,6 +156,15 @@ static void draw_group_mode(struct nk_context *ctx, const char **cluster_paths, 
         }
         nk_group_end(ctx);
     }
+
+    /* The selection priced as one body of code, not file by file. */
+    CodeTotals code = { 0 };
+    for (size_t i = 0; i < cluster_count; i++) {
+        if (cluster_ids[i] >= graph->node_count) continue;
+        const GraphNode *gn = &graph->nodes[cluster_ids[i]];
+        code_totals_add(&code, &gn->stats, gn->language);
+    }
+    draw_cost_summary(ctx, &code, cost);
 
     const Note *found[64];
     size_t found_n = notes_find_for_group(notes, cluster_paths, cluster_count, found, 64);
@@ -208,7 +221,9 @@ static int cycle_mates(const Graph *g, int selected, const char **out, int cap) 
 static int stats_row_count(const Graph *g, int selected) {
     const NodeStats *st = &g->nodes[selected].stats;
     if (!st->has_stats) return 2;
-    int rows = 11; /* lines, indent, complexity, in, out, blast, cycle, unresolved, parse errors, git, hotspot */
+    /* lines, code lines, by hand, by AI, value, indent, complexity, in,
+     * out, blast, cycle, unresolved, parse errors, git, hotspot */
+    int rows = 15;
     if (st->git_last_commit > 0) rows++;
     if (st->cycle_size > 1) {
         int mates = st->cycle_size - 1;
@@ -228,7 +243,35 @@ static const char *plural(int n, const char *one, const char *many) {
     return n == 1 ? one : many;
 }
 
-static void draw_stats(struct nk_context *ctx, const Graph *g, int selected) {
+/* One file's code lines and what it's worth: always four rows. */
+static void cost_rows(struct nk_context *ctx, const NodeStats *st, const char *language, const CostParams *cost) {
+    CodeTotals code = { 0 };
+    code_totals_add(&code, st, language);
+    char v[160], money[32];
+    snprintf(v, sizeof(v), "%lld", code.sloc);
+    stat_row(ctx, "Code lines", v);
+    if (code.sloc <= 0) {
+        stat_row(ctx, "By hand", "n/a (no code)");
+        stat_row(ctx, "By AI", "n/a");
+        stat_row(ctx, "Value", "n/a");
+        return;
+    }
+    CostEstimate e = cost_estimate(code.sloc, cost);
+    cost_format_money(e.cost, cost->currency, money, sizeof(money));
+    snprintf(v, sizeof(v), "~%s, %.1f person-months", money, e.effort_months);
+    stat_row(ctx, "By hand", v);
+    AiEstimate ai = cost_estimate_ai(&code, cost);
+    char tokens[32];
+    cost_format_money(ai.cost, cost->currency, money, sizeof(money));
+    cost_format_count(ai.tokens_spent, tokens, sizeof(tokens));
+    snprintf(v, sizeof(v), "~%s, %s tokens", money, tokens);
+    stat_row(ctx, "By AI", v);
+    cost_format_money(cost_value(&code, cost), cost->currency, money, sizeof(money));
+    snprintf(v, sizeof(v), "~%s at %.0f%% AI", money, cost->ai_share * 100.0);
+    stat_row(ctx, "Value", v);
+}
+
+static void draw_stats(struct nk_context *ctx, const Graph *g, int selected, const CostParams *cost) {
     const NodeStats *st = &g->nodes[selected].stats;
     char v[160];
     if (!st->has_stats) {
@@ -240,6 +283,7 @@ static void draw_stats(struct nk_context *ctx, const Graph *g, int selected) {
 
     snprintf(v, sizeof(v), "%d (%d blank, %d with comments)", st->lines, st->blank_lines, st->comment_lines);
     stat_row(ctx, "Lines", v);
+    cost_rows(ctx, st, g->nodes[selected].language, cost);
     snprintf(v, sizeof(v), "%d %s deep", st->max_indent, plural(st->max_indent, "level", "levels"));
     stat_row(ctx, "Indentation", v);
     if (st->complexity < 0) {
@@ -404,8 +448,54 @@ static int duplicate_markers(const Graph *g, int selected, TextAreaMarker *marke
     return count;
 }
 
+/* ---- Cost ---------------------------------------------------------------- */
+
+static void draw_cost_summary(struct nk_context *ctx, const CodeTotals *code, const CostParams *cost) {
+    char v[160], money[32];
+    snprintf(v, sizeof(v), "%d code %s, %lld lines", code->files, plural(code->files, "file", "files"), code->sloc);
+    stat_row(ctx, "Code", v);
+    if (code->sloc <= 0) return;
+
+    CostEstimate e = cost_estimate(code->sloc, cost);
+    cost_format_money(e.cost, cost->currency, money, sizeof(money));
+    snprintf(v, sizeof(v), "~%s (COCOMO, %s)", money, cocomo_mode_name(cost->mode));
+    stat_row(ctx, "By hand", v);
+    snprintf(v, sizeof(v), "%.1f person-months", e.effort_months);
+    stat_row(ctx, "  Effort", v);
+    snprintf(v, sizeof(v), "%.1f months with %.1f people", e.schedule_months, e.people);
+    stat_row(ctx, "  Schedule", v);
+
+    AiEstimate ai = cost_estimate_ai(code, cost);
+    char kept[32], spent[32];
+    cost_format_money(ai.cost, cost->currency, money, sizeof(money));
+    snprintf(v, sizeof(v), "~%s at %s%g per million tokens", money, cost->currency, cost->token_price);
+    stat_row(ctx, "By AI", v);
+    cost_format_count(ai.tokens_kept, kept, sizeof(kept));
+    cost_format_count(ai.tokens_spent, spent, sizeof(spent));
+    snprintf(v, sizeof(v), "%s kept x %.0f = %s spent", kept, ai.multiplier, spent);
+    stat_row(ctx, "  Tokens", v);
+
+    cost_format_money(cost_value(code, cost), cost->currency, money, sizeof(money));
+    snprintf(v, sizeof(v), "~%s at %.0f%% AI", money, cost->ai_share * 100.0);
+    stat_row(ctx, "Value", v);
+}
+
+/* Nothing selected: the whole graph at a glance. */
+static void draw_overview(struct nk_context *ctx, const Graph *graph, const CostParams *cost) {
+    CodeTotals code = { 0 };
+    for (size_t i = 0; i < graph->node_count; i++) code_totals_add(&code, &graph->nodes[i].stats, graph->nodes[i].language);
+    nk_layout_row_dynamic(ctx, 8, 1);
+    nk_spacing(ctx, 1);
+    nk_layout_row_dynamic(ctx, 20, 1);
+    nk_label(ctx, "Overview", NK_TEXT_LEFT);
+    char v[64];
+    snprintf(v, sizeof(v), "%zu (%zu dependencies)", graph->node_count, graph->edge_count);
+    stat_row(ctx, "Files", v);
+    draw_cost_summary(ctx, &code, cost);
+}
+
 static void draw_single_mode(struct nk_context *ctx, float panel_h, const Graph *graph, int selected,
-                              const char *selected_path, const char *selected_language,
+                              const char *selected_path, const char *selected_language, const CostParams *cost,
                               NoteSet *notes, const char *notes_md_path) {
     load_file_if_needed(selected_path);
     reset_delete_arm_if_context_changed(selected_path ? selected_path : "");
@@ -416,6 +506,7 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h, const Graph 
         nk_label(ctx, "Right-click a node to select it.", NK_TEXT_LEFT);
         nk_label(ctx, "Left-drag a node to reposition it.", NK_TEXT_LEFT);
         nk_label(ctx, "Ctrl/Cmd+right-click to add to a group.", NK_TEXT_LEFT);
+        if (graph && graph->node_count > 0) draw_overview(ctx, graph, cost);
         return;
     }
 
@@ -433,7 +524,7 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h, const Graph 
         float pitch = STATS_ROW_H + ctx->style.window.spacing.y;
         stats_h = 24.0f + ctx->style.window.spacing.y;
         if (nk_tree_state_push(ctx, NK_TREE_TAB, "Stats", &g_stats_state)) {
-            draw_stats(ctx, graph, selected);
+            draw_stats(ctx, graph, selected, cost);
             stats_h += pitch * (float)stats_row_count(graph, selected);
             nk_tree_pop(ctx);
         }
@@ -524,8 +615,8 @@ static void draw_single_mode(struct nk_context *ctx, float panel_h, const Graph 
 void ui_panel_draw(struct nk_context *ctx, int window_width, int window_height,
                     const Graph *graph, int selected,
                     const char *selected_path, const char *selected_language,
-                    const char **cluster_paths, size_t cluster_count,
-                    NoteSet *notes, const char *notes_md_path,
+                    const unsigned int *cluster_ids, const char **cluster_paths, size_t cluster_count,
+                    const CostParams *cost, NoteSet *notes, const char *notes_md_path,
                     PanelRect *out_bounds) {
     float w = (float)UI_PANEL_WIDTH;
     /* NK_WINDOW_MOVABLE|NK_WINDOW_SCALABLE: this rect is only honored the
@@ -543,10 +634,11 @@ void ui_panel_draw(struct nk_context *ctx, int window_width, int window_height,
         out_bounds->h = b.h;
 
         if (cluster_count > 1) {
-            draw_group_mode(ctx, cluster_paths, cluster_count, notes, notes_md_path);
+            draw_group_mode(ctx, graph, cluster_ids, cluster_paths, cluster_count, cost, notes, notes_md_path);
         } else {
             struct nk_vec2 size = nk_window_get_size(ctx);
-            draw_single_mode(ctx, size.y, graph, selected, selected_path, selected_language, notes, notes_md_path);
+            draw_single_mode(ctx, size.y, graph, selected, selected_path, selected_language, cost, notes,
+                             notes_md_path);
         }
     } else if (nk_window_is_collapsed(ctx, UI_PANEL_TITLE)) {
         /* nk_begin/nk_panel_begin returns false for a MINIMIZED window,

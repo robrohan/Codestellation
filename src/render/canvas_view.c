@@ -16,6 +16,8 @@
 #include "../canvas/canvas_doc.h"
 #include "../canvas/project.h"
 #include "../canvas/canvas_index.h"
+#include "../canvas/canvas_cost.h"
+#include "../common/cost.h"
 #include "../common/pathutil.h"
 #include "tinyfiledialogs.h"
 #include <math.h>
@@ -215,56 +217,10 @@ static char *canvas_link_of(const CanvasNode *n) {
     return first;
 }
 
-/* The existing folders this node links to -- [[targets]] in a text node
- * (or a file node's path) that resolve, relative to the current canvas, to
- * a directory. Returns the count; *out is a malloc'd array of malloc'd
- * absolute paths (NULL when 0). */
+/* The existing folders this node links to, relative to the current
+ * canvas (see canvas_node_dir_links). */
 static size_t dir_links_of(const CanvasNode *n, char ***out) {
-    *out = NULL;
-    size_t count = 0, cap = 0;
-    const char *single = NULL;
-    if (n->type == CNODE_FILE) single = n->file;
-    else if (n->type != CNODE_TEXT || !n->text) return 0;
-
-    const char *p = single ? NULL : n->text;
-    for (;;) {
-        const char *target;
-        size_t len;
-        if (single) {
-            target = single;
-            len = strlen(single);
-        } else {
-            p = strstr(p, "[[");
-            if (!p) break;
-            p += 2;
-            const char *end = strstr(p, "]]");
-            if (!end) break;
-            len = 0;
-            while (p + len < end && p[len] != '|' && p[len] != '#') len++;
-            target = p;
-            p = end + 2;
-        }
-        if (len > 0 && !ends_with_ci(target, len, ".canvas")) {
-            char *raw = (char *)malloc(len + 1);
-            memcpy(raw, target, len);
-            raw[len] = '\0';
-            char *path = project_resolve_link(cur_path(), raw);
-            free(raw);
-            bool dup = false;
-            for (size_t i = 0; i < count; i++) dup = dup || strcmp((*out)[i], path) == 0;
-            if (!dup && path_is_dir(path)) {
-                if (count == cap) {
-                    cap = cap ? cap * 2 : 4;
-                    *out = (char **)realloc(*out, cap * sizeof(char *));
-                }
-                (*out)[count++] = path;
-            } else {
-                free(path);
-            }
-        }
-        if (single) break;
-    }
-    return count;
+    return canvas_node_dir_links(n, cur_path(), out);
 }
 
 static void free_dirs(char **dirs, size_t count) {
@@ -275,11 +231,14 @@ static void free_dirs(char **dirs, size_t count) {
 /* dir_links_of resolves and stats every link -- too much to redo for each
  * box every frame just to draw a marker -- so the count is cached per node
  * index, keyed on a hash of what it was computed from. Cleared whenever a
- * canvas loads (links are relative to it). */
+ * canvas loads (links are relative to it). The box's code size (see
+ * canvas_cost.h) rides along, worked out on first draw. */
 typedef struct {
     uint64_t key;
     int count;
     bool valid;
+    bool size_valid;
+    CodeSize size;
 } DirCountCache;
 static DirCountCache *g_dir_cache = NULL;
 static size_t g_dir_cache_cap = 0;
@@ -311,12 +270,31 @@ static int cached_dir_count(int i) {
         c->key = key;
         c->count = (int)count;
         c->valid = true;
+        c->size_valid = false;
     }
     return c->count;
 }
 
+/* Code behind box i: its folders plus everything on canvases it nests.
+ * Call after cached_dir_count(i), which keeps the entry current. */
+static const CodeSize *cached_size(int i) {
+    DirCountCache *c = &g_dir_cache[i];
+    if (!c->size_valid) {
+        c->size = canvas_cost_node(&g_doc.nodes[i], cur_path());
+        c->size_valid = true;
+    }
+    return &c->size;
+}
+
+/* The whole current canvas's code, recomputed after loads and saves (it
+ * reads the canvases from disk, so it must follow a flush). */
+static CodeSize g_canvas_size;
+static const CostParams *g_cost; /* this frame's, from canvas_view_draw */
+static bool g_canvas_size_valid = false;
+
 static void clear_dir_cache(void) {
     if (g_dir_cache) memset(g_dir_cache, 0, g_dir_cache_cap * sizeof(DirCountCache));
+    g_canvas_size_valid = false;
 }
 
 /* Crumb label for going into node n: its title, else the link's file name. */
@@ -359,6 +337,7 @@ static void flush(void) {
     if (!g_dirty) return;
     if (!canvas_doc_write(&g_doc, cur_path())) fprintf(stderr, "error: could not save %s\n", cur_path());
     g_dirty = false;
+    g_canvas_size_valid = false;
 }
 
 static void clear_selection(void) {
@@ -710,6 +689,7 @@ static void leave_code(void) {
     g_in_code = false;
     free(g_code_title);
     g_code_title = NULL;
+    clear_dir_cache(); /* the trip to 3D may have built code the costs can now count */
 }
 
 void canvas_view_open_search(void) {
@@ -1434,6 +1414,7 @@ static void draw_box(struct nk_command_buffer *c, int i, struct nk_rect window_c
     /* Corner markers so it's obvious shift+click goes somewhere: a
      * triangle for a canvas link, "</>" for folders of code. */
     char *link = canvas_link_of(n);
+    int link_count = link ? 1 : 0;
     float marker_x = r.x + r.w - 4.0f;
     if (link) {
         free(link);
@@ -1449,6 +1430,31 @@ static void draw_box(struct nk_command_buffer *c, int i, struct nk_rect window_c
         nk_draw_text(c, nk_rect(marker_x - w, r.y + 3.0f, w + 2.0f, f->height), "</>", 3, f, nk_rgba(0, 0, 0, 0),
                      theme_nk(border));
         nk_push_scissor(c, window_clip);
+    }
+
+    /* Bottom-right: what the code behind the box would cost to write. */
+    if (g_zoom >= 0.3f && (cached_dir_count(i) > 0 || link_count > 0)) {
+        const CodeSize *size = cached_size(i);
+        char label[96];
+        if (size->code.sloc > 0) {
+            char money[32], lines[32];
+            cost_format_money(cost_value(&size->code, g_cost), g_cost->currency, money, sizeof(money));
+            cost_format_count((double)size->code.sloc, lines, sizeof(lines));
+            snprintf(label, sizeof(label), "%s lines \xC2\xB7 ~%s", lines, money);
+        } else if (size->unbuilt > 0) {
+            snprintf(label, sizeof(label), "cost: open code to count");
+        } else {
+            label[0] = '\0';
+        }
+        int len = (int)strlen(label);
+        if (len > 0) {
+            const struct nk_user_font *f = fonts_sized(FONT_MONO, fminf(fmaxf(10.0f * g_zoom, 8.0f), 13.0f));
+            float w = f->width(f->userdata, f->height, label, len);
+            push_clip(c, r, window_clip);
+            nk_draw_text(c, nk_rect(r.x + r.w - w - 6.0f, r.y + r.h - f->height - 3.0f, w + 2.0f, f->height), label,
+                         len, f, nk_rgba(0, 0, 0, 0), theme_nk(g_theme.canvas_edge_label));
+            nk_push_scissor(c, window_clip);
+        }
     }
 }
 
@@ -1539,8 +1545,45 @@ static void draw_canvas_layer(struct nk_context *ctx, int width, int height) {
                  g_zoom * 100.0f, mod, mod);
         float fh = fonts_ui()->height;
         draw_text_at(c, 12.0f, (float)height - fh - 12.0f, hud, g_theme.canvas_edge_label);
+        float status_y = (float)height - fh * 2.0f - 18.0f;
+
+        if (!g_canvas_size_valid && !g_dirty) {
+            g_canvas_size = canvas_cost_canvas(cur_path());
+            g_canvas_size_valid = true;
+        }
+        const CodeTotals *code = &g_canvas_size.code;
+        if (g_canvas_size_valid && (code->sloc > 0 || g_canvas_size.unbuilt > 0)) {
+            char line[400];
+            int len = 0;
+            if (code->sloc > 0) {
+                CostEstimate e = cost_estimate(code->sloc, g_cost);
+                char hand[32], ai[32], lines[32];
+                cost_format_money(e.cost, g_cost->currency, hand, sizeof(hand));
+                cost_format_money(cost_estimate_ai(code, g_cost).cost, g_cost->currency, ai, sizeof(ai));
+                cost_format_count((double)code->sloc, lines, sizeof(lines));
+                len = snprintf(line, sizeof(line),
+                               "This canvas: %d code files \xC2\xB7 %s lines \xC2\xB7 by hand ~%s (%.1f person-months) "
+                               "\xC2\xB7 by AI ~%s",
+                               code->files, lines, hand, e.effort_months, ai);
+                if (g_cost->ai_share > 0.0 && len > 0 && (size_t)len < sizeof(line)) {
+                    char value[32];
+                    cost_format_money(cost_value(code, g_cost), g_cost->currency, value, sizeof(value));
+                    len += snprintf(line + len, sizeof(line) - (size_t)len, " \xC2\xB7 at %.0f%% AI ~%s",
+                                    g_cost->ai_share * 100.0, value);
+                }
+            } else {
+                len = snprintf(line, sizeof(line), "This canvas: no code counted yet");
+            }
+            if (g_canvas_size.unbuilt > 0 && len > 0 && (size_t)len < sizeof(line)) {
+                snprintf(line + len, sizeof(line) - (size_t)len, "   \xC2\xB7   %d %s not opened in 3D yet, not counted",
+                         g_canvas_size.unbuilt, g_canvas_size.unbuilt == 1 ? "code link" : "code links");
+            }
+            draw_text_at(c, 12.0f, status_y, line, g_theme.canvas_edge_label);
+            status_y -= fh + 6.0f;
+        }
+
         if (g_load_failed) {
-            draw_text_at(c, 12.0f, (float)height - fh * 2.0f - 18.0f,
+            draw_text_at(c, 12.0f, status_y,
                          "This canvas file could not be read \xE2\x80\x94 changes here will not be saved.",
                          g_theme.box_preset[0]);
         }
@@ -1805,7 +1848,8 @@ static void draw_search(struct nk_context *ctx, int width, int height, PanelRect
     nk_end(ctx);
 }
 
-void canvas_view_draw(struct nk_context *ctx, int width, int height, CanvasPanels *out) {
+void canvas_view_draw(struct nk_context *ctx, int width, int height, const CostParams *cost, CanvasPanels *out) {
+    g_cost = cost;
     out->crumbs = out->editor = out->search = (PanelRect){ 0, 0, 0, 0 };
     if (!g_open) return;
     if (!g_in_code) draw_canvas_layer(ctx, width, height);

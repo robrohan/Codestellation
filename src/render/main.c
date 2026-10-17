@@ -39,6 +39,8 @@
 #include "winstate.h"
 #include "../canvas/project.h"
 #include "../canvas/export.h"
+#include "../canvas/canvas_cost.h"
+#include "../common/cost.h"
 #include "panel_rect.h"
 #include "../common/pathutil.h"
 #include "../graph/graph.h"
@@ -269,10 +271,23 @@ static bool ends_with(const char *s, const char *suffix) {
     return n >= m && strcmp(s + n - m, suffix) == 0;
 }
 
+/* When the open project's cost settings were last edited in the
+ * Properties pane and not yet saved; < 0 when there's nothing to save.
+ * Saving waits for a pause so dragging a value doesn't rewrite
+ * project.json every frame. */
+static double g_cost_dirty_since = -1.0;
+
+static void save_project_cost(Project *p, bool have_project) {
+    if (g_cost_dirty_since < 0.0) return;
+    g_cost_dirty_since = -1.0;
+    if (have_project && !project_save(p)) fprintf(stderr, "error: could not save %s\n", p->path);
+}
+
 /* Swaps the open system-map project for `p` (taking ownership) and shows
  * its root canvas. */
 static void project_activate(GLFWwindow *win, Project *current, bool *have_project, Project *p) {
     canvas_view_close();
+    save_project_cost(current, *have_project);
     if (*have_project) project_free(current);
     *current = *p;
     *have_project = true;
@@ -284,6 +299,7 @@ static void project_activate(GLFWwindow *win, Project *current, bool *have_proje
 
 static void project_deactivate(GLFWwindow *win, Project *current, bool *have_project) {
     canvas_view_close();
+    save_project_cost(current, *have_project);
     if (*have_project) project_free(current);
     *have_project = false;
     glfwSetWindowTitle(win, "Codestellation");
@@ -437,6 +453,8 @@ int main(int argc, char **argv) {
      * (canvas_view.h) replaces the 3D view. */
     Project project;
     bool have_project = false;
+    CostParams default_cost;
+    cost_params_default(&default_cost);
     if (project_arg) {
         Project p;
         if (project_open(project_arg, &p)) {
@@ -726,7 +744,9 @@ int main(int argc, char **argv) {
         }
 
         PropsResult props = { PROPS_NONE, NULL, NULL };
-        bool export_notes_clicked = false;
+        bool export_notes_clicked = false, cost_changed = false;
+        /* A project's own cost settings; plain folders get the defaults. */
+        const CostParams *cost = have_project ? &project.cost : &default_cost;
         winstate_set_screen(width, height);
         {
             const char *sel_path = selected >= 0 ? lg.graph.nodes[selected].path : NULL;
@@ -746,17 +766,21 @@ int main(int argc, char **argv) {
                 note_bounds = (PanelRect){ 0, 0, 0, 0 };
             } else {
                 ui_panel_draw(ctx, width, height, &lg.graph, selected, sel_path, sel_lang,
-                              cluster_paths, cluster_count,
+                              cluster_ids, cluster_paths, cluster_count, cost,
                               &lg.notes, lg.notes_path, &inspector_bounds);
                 note_compose_draw(ctx, &lg.notes, lg.notes_path, &note_bounds);
             }
             props = properties_panel_draw(ctx, &show_origin, lg.notes_path != NULL, have_project,
+                                          have_project ? &project.cost : NULL, &cost_changed,
                                           &export_notes_clicked, &properties_bounds);
             /* In code view this draws just the breadcrumb bar, over the 3D. */
-            canvas_view_draw(ctx, width, height, &canvas_panels);
+            canvas_view_draw(ctx, width, height, cost, &canvas_panels);
             if (!canvas_mode) {
+                int fb_w, fb_h;
+                glfwGetFramebufferSize(win, &fb_w, &fb_h);
                 labels_draw(ctx, width, height, inspector_bounds, note_bounds, properties_bounds,
-                            view_proj, lg.positions, &lg.graph, &lg.notes, selected);
+                            view_proj, lg.positions, lg.sizes, width > 0 ? (float)fb_w / (float)width : 1.0f,
+                            &lg.graph, &lg.notes, cost, selected);
             }
 
             if (build) {
@@ -821,6 +845,11 @@ int main(int argc, char **argv) {
         free(props.path);
         free(props.title);
 
+        if (cost_changed) g_cost_dirty_since = glfwGetTime();
+        if (g_cost_dirty_since >= 0.0 && glfwGetTime() - g_cost_dirty_since > 0.75) {
+            save_project_cost(&project, have_project);
+        }
+
         if (export_notes_clicked && lg.notes_path) {
             /* graph.notes.md lives under Application Support, easy to
              * lose track of -- tinyfd_saveFileDialog + a plain copy gets
@@ -874,6 +903,7 @@ int main(int argc, char **argv) {
     project_deactivate(win, &project, &have_project);
     gl_scene_destroy(&scene);
     ui_panel_shutdown();
+    canvas_cost_shutdown();
     nk_glfw3_shutdown(&glfw_nk);
     glfwTerminate();
 
