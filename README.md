@@ -4,22 +4,33 @@
 
 ![code_view](./doc/code_view.png)
 
+- [Codestellation](#codestellation)
+  - [What is Codestellation](#what-is-codestellation)
+  - [Supported languages](#supported-languages)
+  - [Build](#build)
+    - [Windows and Linux](#windows-and-linux)
+    - [macOS Xcode project](#macos-xcode-project)
+  - [Run](#run)
+  - [Cost Estimates](#cost-estimates)
+    - [Humans: COCOMO](#humans-cocomo)
+    - [AI: Tokens](#ai-tokens)
+    - [Code Value](#code-value)
+    - [Groups Don't Add Together](#groups-dont-add-together)
+    - [Where Costs are Displayed](#where-costs-are-displayed)
+    - [Settings](#settings)
 
-## What it Does
 
-The canvas view is for multi-level system diagrams. Draw boxes for servers,
-services, databases, regions, or whatever your system is made of, connect
-them with labelled lines, and nest them as deep as you like: shift+click a
-box to go "into it" and diagram what's inside the box.
+## What is Codestellation
 
-You can use a structure like the [C4 model](https://c4model.com) (context, containers, components, code) or make up your own levels. At the node of any diagram, a box
-can point at folders of source code, which opens them in the 3D code view so you can comment
-and see the source structure. Every box holds markdown notes, and the whole map can be searched or exported as a single document.
+Codestellation helps you map or construct a system using hierarchical abstractions. It is built for digging through unfamiliar, legacy, or "vibe coded" multi-language codebases, as well as starting fresh designs and working through what you are trying to build. The latest verison also does cost estimations base on the linked code.
 
-The codestellation view walks a codebase, extracts cross-file dependencies with
-tree-sitter, and renders them as an interactive 3D graph in native OpenGL + Nuklear.
+The canvas view is for multi-level system diagrams. Draw boxes for servers, services, databases, regions, or whatever your system is made of, connect them with labelled lines, and nest them as deep as you like: shift+click a box to go "into it" and diagram what's inside the box.
 
-Codestellation is built for digging through unfamiliar, legacy, or "vibe coded" multi-language codebases, and it's export is meant to make a manual, or to feed back into an LLM.
+You can use a structure like the [C4 model](https://c4model.com) (context, containers, components, code) or make up your own levels. At the node of any diagram, a box can point at folders of source code, which opens them in the 3D code view so you can comment and see the source structure. It uses a 3D view, because 2D can sometimes [be impossible to navigate](https://www.youtube.com/watch?v=92kcm3b-Q_s).
+
+Every 2D box can have markdown notes, and every file can have notes attached to the overall file or a specific line. The whole project can exported as a single document to aid in writing a design document or to feed to an LLM to build your creation.
+
+The codestellation view walks a codebase, extracts cross-file dependencies with tree-sitter, and renders them as an interactive 3D graph using OpenGL + Nuklear. The formats used are [JSON Canvas](https://jsoncanvas.org) for the 2D box view (the same format Obsidian uses), and the graph files are saved as [NetworkX Node-Link JSON schema](https://networkx.org/en/).
 
 ## Supported languages
 
@@ -46,95 +57,41 @@ Codestellation is built for digging through unfamiliar, legacy, or "vibe coded" 
 
 Notes:
 
-- **JavaScript / TypeScript:** relative imports resolve like Node, tsc and
-  bundlers (extensions, `index` files, `./x.js` meaning `x.ts`). Bare imports
-  go through the nearest `tsconfig.json`/`jsconfig.json` before counting as
-  packages. TypeScript files can import JSON files.
-- **SQL** links by object name, so migrations, views and queries point at the
-  file that created what they use.
-- **PowerShell and batch** scripts that call each other are linked.
-  `$PSScriptRoot` and `%~dp0` mean "this script's folder".
-- **HTML, CSS and Markdown** links are file paths, so they can point at any
-  file whose adapter declares its path (C, JS/TS, JSON, PHP, Python, shell,
-  and these three). Other sites, `#anchors`, `mailto:` and the like are
-  skipped, as are images, fonts and media. A link starting with `/` is
-  site-root relative; since the root isn't known, it's tried against each
-  folder above the page. Inline `<script>` and `<style>` bodies aren't
-  parsed. A Markdown `[[wiki link]]` finds the nearest note of that name,
-  as Obsidian does.
-- **Python, Go and Protocol Buffers** have no in-source module identity, so
-  they match imports by path suffix -- a documented best guess. See the
-  header comments in `src/lang/python/python_adapter.c` and
-  `src/lang/go/go_adapter.c`.
-- **VB.NET:** the pinned grammar misparses `Inherits` / `Implements` lines,
-  so base-class and interface links don't appear; `Imports` do. See
-  `src/lang/vbnet/vbnet_adapter.c`.
-- **Common Lisp** is a stand-in for an unconfirmed dialect; read the header of
-  `src/lang/lisp/lisp_adapter.c` before trusting it on a real codebase.
-- Each adapter's header comment documents exactly what it recognises, and
-  `test_data/` has a small sample project for every language.
+- **JavaScript / TypeScript:** relative imports resolve like Node, tsc and bundlers (extensions, `index` files, `./x.js` meaning `x.ts`). Bare imports go through the nearest `tsconfig.json`/`jsconfig.json` before counting as packages. TypeScript files can import JSON files.
+- **SQL** links by object name, so migrations, views and queries point at the file that created what they use.
+- **PowerShell and batch** scripts that call each other are linked. `$PSScriptRoot` and `%~dp0` mean "this script's folder".
+- **HTML, CSS and Markdown** links are file paths, so they can point at any file whose adapter declares its path (C, JS/TS, JSON, PHP, Python, shell, and these three). Other sites, `#anchors`, `mailto:` and the like are skipped, as are images, fonts and media. A link starting with `/` is site-root relative; since the root isn't known, it's tried against each folder above the page. Inline `<script>` and `<style>` bodies aren't parsed. A Markdown `[[wiki link]]` finds the nearest note of that name, as Obsidian does.
+- **Python, Go and Protocol Buffers** have no in-source module identity, so they match imports by path suffix -- a documented best guess. See the header comments in `src/lang/python/python_adapter.c` and `src/lang/go/go_adapter.c`.
+- **VB.NET:** the pinned grammar misparses `Inherits` / `Implements` lines, so base-class and interface links don't appear; `Imports` do. See `src/lang/vbnet/vbnet_adapter.c`.
+- **Common Lisp** is a stand-in for an unconfirmed dialect; read the header of `src/lang/lisp/lisp_adapter.c` before trusting it on a real codebase.
+- Each adapter's header comment documents exactly what it recognises, and `test_data/` has a small sample project for every language.
 
-The walker skips `node_modules`, `dist`, `.next`, `coverage`, `build`,
-`vendor` and similar output directories, plus minified `*.min.js` files.
+The walker skips `node_modules`, `dist`, `.next`, `coverage`, `build`, `vendor` and similar output directories, plus minified `*.min.js` files.
 
 ## Build
+
+### Windows and Linux
 
 ```
 cmake -S . -B build
 cmake --build build
 ```
 
-Fetches tree-sitter + per-language grammars and GLFW via CMake
-FetchContent on first configure (the C# grammar's generated parser is
-large, so that step takes a bit). Verified on macOS; Windows/Linux
-should work (a GL loader and the directory-walk code both have
-non-Apple branches) but hasn't been run on real hardware in this
-environment -- see the Phase 7 commit message for specifics.
+Fetches tree-sitter, per-language grammars, and GLFW via CMake FetchContent on first configure (the C# grammar's generated parser is large, so that step takes a while). The application is regularly tested on macOS and Windows. It is less tested, but should work fine on Linux.
 
-### Xcode project
+### macOS Xcode project
 
 ```
 cmake -G Xcode -B build-xcode -S .
 open build-xcode/Codestellation.xcodeproj
 ```
 
-`build-xcode/` is gitignored. Xcode is a multi-config generator, so
-don't pass `-DCMAKE_BUILD_TYPE` -- pick the configuration in Xcode, or
-build from the CLI with `cmake --build build-xcode --config Debug`.
-Editing `CMakeLists.txt` re-runs CMake automatically on the next build
-via the generated `ZERO_CHECK` target.
+`build-xcode/` is gitignored. Xcode is a multi-config generator, so don't pass `-DCMAKE_BUILD_TYPE` -- pick the configuration in Xcode, or build from the CLI with `cmake --build build-xcode --config Debug`. Editing `CMakeLists.txt` re-runs CMake automatically on the next build via the generated `ZERO_CHECK` target.
 
-This produces an ad-hoc-signed `Codestellation.app` that runs straight
-from Xcode's Run button. Hardened runtime is deliberately off here, since
-it refuses the `DYLD_*` injection Xcode's debugger relies on.
+This produces an ad-hoc-signed `Codestellation.app` that runs straight from Xcode's Run button. Hardened runtime is deliberately off here, since it refuses the `DYLD_*` injection Xcode's debugger relies on. To build a release, you have to configure all that by hand in Xcode.
 
-The Xcode build is universal (Apple Silicon + Intel) and targets macOS
-12.0, the oldest Xcode 27 supports (override with
-`-DCMAKE_OSX_ARCHITECTURES=...` / `-DCMAKE_OSX_DEPLOYMENT_TARGET=...`).
-A `build-xcode/` configured before these defaults existed keeps its old
-cached target (the build machine's macOS), so pass
-`-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0` once, or delete the folder and
-reconfigure. The app icon is `resources/macos/Codestellation.icns`,
-generated by `scripts/make_icon.py` (needs numpy).
-
-For a Developer-ID-signed, hardened-runtime `.app` to hand to another
-Mac:
-
-```
-cmake -G Xcode -B build-xcode -S . -DCODESTELLATION_DIST=ON
-cmake --build build-xcode --config Release
-```
-
-Don't Run that build from Xcode -- launch the built `.app` directly
-(Finder or `open`), where no `DYLD_*` injection happens. The signature
-carries a secure timestamp, as notarization requires.
-
-Or use Product > Archive, then Distribute App > Direct Distribution in the
-Organizer, which signs with your Developer ID and notarizes in one go.
-Note that Archive replaces `build-xcode/src/Release/Codestellation.app`
-with a symlink into Xcode's DerivedData. If DerivedData is later cleaned, a
-plain Release build fails with "unable to create directory ...
-Codestellation.app": delete that dangling link and build again.
+The Xcode build is universal (Apple Silicon + Intel) and targets macOS 12.0, the oldest Xcode 27 supports (override with `-DCMAKE_OSX_ARCHITECTURES=...` / `-DCMAKE_OSX_DEPLOYMENT_TARGET=...`).
+A `build-xcode/` configured before these defaults existed keeps its old cached target (the build machine's macOS), so pass `-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0` once, or delete the folder and reconfigure. The app icon is `resources/macos/Codestellation.icns`, generated by `scripts/make_icon.py` (needs numpy).
 
 ## Run
 
@@ -144,119 +101,25 @@ Codestellation.app": delete that dangling link and build again.
 ./build/src/codemap-view graph.json            # or a previously built graph
 ```
 
-**Projects (system maps).** Properties > New Project... makes a
-`project.json` (title, description, root canvas) plus `root.canvas` in a
-folder you pick. Canvases are standard [JSON Canvas](https://jsoncanvas.org)
-files, so Obsidian can open them too. On the canvas:
+Stats are worked out when the graph is built, so a `graph.json` from an older build shows a note to reopen the folder instead.
 
-- double-click empty space to add a box; double-click a box or edge to edit
-  it in the side panel (markdown for boxes, a label, arrows and colour for
-  edges)
-- drag a box to move it, its bottom-right corner to resize, one of its side
-  dots to draw an edge to another box. Edges reattach to the facing sides as
-  boxes move; tick "Lock sides" in an edge's editor to pin it where it is
-- Cmd/Ctrl+right-drag to draw a group: a labelled frame behind the boxes, for
-  notes or a rough grouping while you work something out (moving it doesn't
-  carry the boxes inside along)
-- shift+click a box containing `[[something.canvas]]` to go into that canvas
-  (created on first visit); the breadcrumb bar at the top walks back out
-- shift+click a box whose `[[links]]` point at folders (relative to the
-  canvas, or absolute) to open that code in the 3D explorer -- several
-  folders are merged into one graph; Esc or a breadcrumb returns to the
-  canvas. A box with both kinds goes into the canvas; its editor has an
-  "Open code" button
-- Cmd+F (Ctrl+F elsewhere) or the breadcrumb bar's Search button searches
-  every canvas in the project. **Go** jumps to a result; **Link here** drops a
-  *weak link* on the current canvas: a dashed, read-only box showing the
-  original's live text, which you can connect edges to (e.g. a server in one
-  region talking to a database in another). Shift+click a weak link to jump
-  to the original
-- Delete/Backspace removes the selection; Esc closes search or the editor,
-  clears the selection, then goes up a level
-- scroll to zoom, drag empty space (or right/middle-drag) to pan
+With nothing selected, the Inspector shows an **Overview** of the whole graph: file and dependency counts and the cost of all its code. You can select several files (Cmd/Ctrl+right-click) to see their combined cost or add a note about the group.
 
-Every change saves to the `.canvas` file automatically.
+Optional sanity check of a built graph (needs networkx), pointed at the cached `graph.json` in the project's _~/Library/Application Support/Codestellation/_ folder:
 
-**Export.** With a project open, Properties > Export Manual... writes the
-whole system map as one Markdown document: each canvas a section, each box a
-subsection, groups nesting their boxes, edges listed as connections, and for
-boxes with folder links a code summary (languages, file counts, size and
-cost, most depended-on files) plus your notes on the code. It opens with an
-"Estimated cost" section for all the code behind the map (see
-[Cost estimates](#cost-estimates)). Export LLM Brief... writes
-the same content framed as context for an AI assistant, with every
-component's full breadcrumb path in its heading.
-
-**Folders (3D explorer).** Properties > Open Folder... builds a directory's
-dependency graph and shows it in 3D: left-drag empty space to orbit, scroll
-to zoom, right-click a node to inspect its file, drag a node to reposition
-it (it stays put -- layout is computed once at load, not a continuous
-simulation). Esc quits from here. Longer files are drawn bigger (on a log
-scale of line count; see `src/render/nodestyle.h`).
-
-The Inspector shows the selected file with line numbers, wrapped to the
-panel's width. A dot in the margin marks a line with a note: click it to
-open the note, or click any line number to add a note to that line. A red
-ring marks where each of the file's most complex functions starts (up to
-five, complexity 10 and up); hover it for the function's name and score.
-A blue bar down the margin marks code that also appears somewhere else in
-the project, in any file or folder (or elsewhere in the same file); hover it
-for the list of other places, as `path:first-last` lines. A copy is at
-least 50 tokens over 5 lines, compared token by token, so layout and comments
-don't matter but renamed variables do. Only code files are compared (the
-languages with complexity, below), only against the same language, and files
-over 1 MB are skipped as generated.
-
-**File stats.** The Inspector's collapsible Stats section shows, for the
-selected file:
-
-- **Lines**, blank lines, and lines with comments on them.
-- **Code lines**, and what they're worth **by hand**, **by AI** and as a
-  blended **value** (see [Cost estimates](#cost-estimates)).
-- **Indentation**: the deepest indent, in the file's own indent steps. It
-  works in any language and stands in for nesting depth.
-- **Complexity**: decision points + 1 (`if`, loops, `case`, `catch`, `?:`,
-  `&&`/`||`...), with the function count and the most complex function.
-  Only for languages with real control flow: "n/a" for JSON, CSS, HTML,
-  Markdown, proto, SQL and Lisp (that grammar has no `if` node to count).
-- **Depended on by / depends on**: distinct files, and the **blast radius**:
-  how many files depend on this one directly or through others (skipped on
-  graphs of more than about 20,000 files).
-- **In a cycle**: the other files in its dependency cycle, if any.
-- **Unresolved refs** and **parse errors**: how far to trust this file's
-  edges.
-- **Git history**: commits, authors and last commit date (merges skipped,
-  renames not followed), and the **hotspot** rank: commits x complexity,
-  highest first. Files whose folder isn't in a git repo show none of this.
-  On macOS git is only run when the developer tools are installed.
-
-Stats are worked out when the graph is built, so a `graph.json` from an
-older build shows a note to reopen the folder instead.
-
-With nothing selected, the Inspector shows an **Overview** of the whole
-graph: file and dependency counts and the cost of all its code. Select
-several files (Cmd/Ctrl+right-click) to see their combined cost.
-
-Optional sanity check of a built graph (needs networkx), pointed at the
-cached `graph.json` in the project's Application Support folder:
-```
+```bash
 python3 scripts/sanity_check.py graph.json
 ```
 
-## Cost estimates
+## Cost Estimates
 
-Codestellation prices code two ways, as rough guides to what it would cost
-to produce, not quotes: as if people wrote it by hand, and as if an AI did.
-A third figure, the **value**, blends the two by how much of the code was
-AI-written.
+Codestellation prices code in two ways, as rough guides to what it would cost to produce, and as if an AI wrote the code. These values should be taken with care. The costing models that are being used are not for quotes, but were created in the 1980-1990s in larger corporations. The mix of the human model and the AI token model show a third figure, the **value**, which blends the two by how much of the code was AI written - again, take these values with a grain of salt.
 
-Only code lines count: lines that aren't blank or comment-only, in files
-that aren't Markdown or JSON.
+Only code lines are used in the calculation. Lines that are blank or comment-only are ignored. As are Markdown and JSON files.
 
-### By hand: COCOMO
+### Humans: COCOMO
 
-Basic COCOMO (Boehm, 1981), the same model and defaults as
-[scc](https://github.com/boyter/scc) and sloccount:
+Based on the Basic COCOMO (Boehm, 1981). We are using the same model and defaults as [scc](https://github.com/boyter/scc) and sloccount:
 
 ```
 effort   = a × KSLOC^b          person-months
@@ -265,26 +128,21 @@ people   = effort ÷ schedule
 cost     = effort × (salary ÷ 12) × overhead
 ```
 
+It's often helpful to look up a senior developer salary in your area for the base file of one person, and the overhead value multiplies salary up to what a developer really costs: benefits, taxes, office, equipment, management. 1.0 is salary only (contractors for example), about 1.3-1.5 is typical in-house staff. The default, 2.4, is fully loaded.
+
+The mode setting controls some parameters that should match your environment:
+
 | Mode | a | b | c | d | For |
 |---|---|---|---|---|---|
 | organic (default) | 2.4 | 1.05 | 2.5 | 0.38 | small teams on familiar problems |
 | semi-detached | 3.0 | 1.12 | 2.5 | 0.35 | in between |
 | embedded | 3.6 | 1.20 | 2.5 | 0.32 | tight hardware, process or regulatory constraints |
 
-*Overhead* multiplies salary up to what a developer really costs: benefits,
-taxes, office, equipment, management. 1.0 is salary only (contractors whose
-rate already covers it), about 1.3–1.5 is typical in-house staff, and the
-default 2.4 is fully loaded.
+The _Person-months_ value show how much work the code represents for a typical team of the kind the model was calibrated on, including design, testing and coordination. It isn't how long it actually took. One person working with modern tools will usually beat it, so read it as an upper bound for solo hand written code. Don't fall into the "if it takes one woman 9 months to make a baby, then it should take 9 women one month" trap.
 
-Person-months measure how much work the code represents for a typical team
-of the kind the model was calibrated on, including design, testing and
-coordination. They aren't how long it actually took: one person working
-with modern tools will usually beat it, so read it as an upper bound for
-solo hand-written code.
+### AI: Tokens
 
-### By AI: tokens
-
-A separate calculation; it doesn't scale the COCOMO figure:
+The AI calculation doesn't touch the COCOMO figure directly.
 
 ```
 tokens kept  = characters ÷ chars_per_token
@@ -293,58 +151,34 @@ tokens spent = tokens kept × multiplier
 cost         = tokens spent ÷ 1,000,000 × token_price
 ```
 
-The tokens in the finished code are only a floor. Producing it means
-reading context, reasoning, and writing code that gets thrown away, and the
-**reasoning multiplier** stands for all of that. Its default of 300 is a
-best guess (about 3¢ a line at the default price); tune it to what you've
-seen. Two factors scale it:
+The token count in the finished code are only a floor. Using AI to produce code means reading context, reasoning, tool calling that doesn't get counted by just estimating the number of tokens in the code (which is just a guess anyway); the **reasoning multiplier** stands for all of that. Its default of 300 which is a best guess (about 3¢ a line at the default price). Two factors to can change the value:
 
-- **Complexity factor**: decision points per code line, against a typical
-  0.2 (roughly the median across a spread of real projects), clamped to
-  0.5×–2×. Code that branches more takes more reasoning per line. Files in
-  languages without complexity count as typical.
-- **Size factor**: `1 + 0.5 × log10(KSLOC)`, at least 1: 1× at 1k lines,
-  1.5× at 10k, 2× at 100k. Bigger code means more context to read for
-  each change.
+- **Complexity factor**: decision points per code line, against a typical 0.2 (roughly the median across a spread of real projects), clamped to 0.5x–2x. Code that branches more often takes more reasoning per line. Files in languages without complexity count as typical.
+- **Size factor**: `1 + 0.5 × log10(KSLOC)`, at least 1: 1x at 1k lines, 1.5x at 10k, 2x at 100k. Longer code means more context to read for each change.
 
-The default price, $10 per million tokens, is Claude Sonnet 5.5's output
-rate as of October 2026. Most tokens an agent spends are cheaper input and
-cache reads, which the multiplier absorbs.
+The default price, $10 per million tokens, is Claude Sonnet 5.5's output rate as of October 2026. Most tokens an agent spends are cheaper input and cache reads, which the multiplier absorbs. Obviously add your own price if you know it.
 
-### Value
+### Code Value
 
 ```
-value = COCOMO cost of the hand-written lines + ai_share × AI cost
+value = COCOMO (cost of the hand-written lines) + AI share × AI cost
 ```
 
-where the hand-written lines are `(1 − ai_share) × code lines`. At 0% AI the
-value is the by-hand cost. Hand-written code costs so much more that even a
-small human share dominates the blend.
+where the hand-written lines are `(1 − ai_share) x code lines`. At 0% AI the value is just the human cost.
 
-### Groups don't add up
+### Groups Don't Add Together
 
-Both models grow faster than the code does, so a set of files is priced by
-adding up its lines, characters and complexity and estimating once, never by
-adding per-file estimates. One file's cost is a rough indication of what that
-piece is worth, not a project estimate.
+Both models grow faster than the code does, so a set of files is priced by adding up its lines, characters and complexity and estimating once, never by adding per-file estimates. One file's cost is a rough indication of what that piece is worth, not a project estimate.
 
-### Where costs show
+### Where Costs are Displayed
 
-- **Inspector**: per file in Stats; for several selected files; for the
-  whole graph in the Overview when nothing is selected.
-- **Canvas**: each box with code behind it shows its lines and value in its
-  bottom-right corner. That covers the box's own folders plus everything on
-  the canvases it links to, all the way down. A line at the bottom gives the
-  whole canvas: by hand, by AI, and the value once the AI share is above 0.
-  Each file counts once, however many boxes reach it. Code that hasn't been
-  opened in 3D yet has no built graph to count, so it's left out and the
-  line says how many links that was.
-- **Export**: an "Estimated cost" section for the whole map, and a Size line
-  in each box's code summary.
+- **Inspector**: per file in Stats; for several selected files; for the whole graph in the Overview when nothing is selected.
+- **Canvas**: each box with code behind it shows its lines and value in its bottom-right corner. That covers the box's own folders plus everything on the canvases it links to, all the way down. A line at the bottom show the whole canvas total. Each file counts once, however many boxes reach it. Code that hasn't been opened in the 3D view yet has no built graph to count. There is a status on the box if it hasn't been included.
+- **Export**: an "Estimated cost" section for the whole map, and a Size line in each box's code summary.
 
 ### Settings
 
-They live in the project's `project.json`, under `cost`:
+Are in the project's `project.json`, under `cost`:
 
 ```json
 "cost": {
@@ -370,65 +204,6 @@ They live in the project's `project.json`, under `cost`:
 | `reasoning_multiplier` | Tokens spent per token kept, before scaling | 300 |
 | `chars_per_token` | Characters per token | 4 |
 
-Everything except `currency` and `chars_per_token` can also be changed in
-the Properties panel while a project is open. Changes are saved back to
-`project.json`, which rewrites the file with only the keys the app knows.
-New projects get the block with defaults. Older projects use the defaults
-until a setting is changed. Opening a plain folder (no project) always uses
-the defaults.
+Everything except `currency` and `chars_per_token` can also be changed in the Properties panel while a project is open.
 
-## graph.json schema
-
-networkx "node-link" format:
-
-```json
-{
-  "directed": true,
-  "graph": {},
-  "nodes": [{"id": 0, "path": "/abs/path/foo.c", "language": "c",
-             "lines": 120, "complexity": 14, "fan_in": 3, "git_commits": 9, ...}],
-  "links": [{"source": 0, "target": 1, "kind": "import"}],
-  "clones": [{"a": 0, "a_line": 40, "a_end": 78, "b": 5, "b_line": 120, "b_end": 158}]
-}
-```
-
-Each node also carries the file stats: `lines`, `blank_lines`,
-`comment_lines`, `chars` (file size in bytes, for the AI cost), `max_indent`, `parse_errors`, `complexity`, `functions`,
-`max_function_complexity`, `fan_in`, `fan_out`, `blast_radius`, `cycle_id`
-(files sharing one form a cycle), `cycle_size`, `unresolved`,
-`git_commits`, `git_authors`, `git_last_commit` (unix seconds),
-`hotspot_rank`, and `hot_functions` (`[{"line", "complexity", "name"}]`,
-the most complex functions first). A key that doesn't apply is left out, e.g. no `complexity`
-for JSON and no `git_*` outside a repo. A graph built before `chars` existed
-gets it estimated at 32 characters per line. See `NodeStats` in `src/graph/graph.h`.
-
-`clones` lists duplicated code: lines `a_line`-`a_end` of node `a` match
-lines `b_line`-`b_end` of node `b` (1-based, inclusive; `a` and `b` can be
-the same file). networkx ignores the key. See `src/pipeline/dupes.h`.
-
-Load in Python: `nx.node_link_graph(json.load(f), edges="links")`
-(older networkx: drop the `edges` kwarg).
-
-## Adding a language
-
-Every language plugs into `src/lang/adapter.h`'s `LanguageAdapter`
-struct -- the pipeline (`src/pipeline/*.c`) never references a specific
-language by name, only through that interface. To add one: pick a
-tree-sitter grammar, fetch it in the top-level `CMakeLists.txt`
-(mirroring the existing `ts_c`/`ts_csharp`/`ts_lisp`/`ts_python`/`ts_go`
-blocks), add the adapter `.c` and its `tree_sitter_*` library to
-`src/CMakeLists.txt`'s `Codestellation` target, register it in
-`src/lang/registry.c`, and write an adapter implementing
-`extract_declarations`/`extract_references`/`resolve_reference`.
-For complexity stats, also set `branch_types` and `function_types`: lists of
-the grammar's node type names for decision points and functions (check them
-against the grammar's `src/node-types.json`; leave them NULL for data or
-markup languages).
-`src/lang/c/c_adapter.c` is the simplest example (no symbol table,
-path-based deps, flat query); `src/lang/csharp/csharp_adapter.c` shows
-scoped namespace/type resolution by walking the parse tree directly
-rather than a flat query; `src/lang/python/python_adapter.c` and
-`src/lang/go/go_adapter.c` show path-derived module identity matched by
-suffix (Python also resolves relative imports against the filesystem);
-`src/lang/lisp/lisp_adapter.c` shows adapting to a grammar with no
-dialect-specific node types at all.
+New projects get the block with defaults. Older projects use the defaults until a setting is changed. Opening a plain folder, the 3D view directly (aka no project), always uses the defaults.
