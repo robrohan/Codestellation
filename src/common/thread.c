@@ -1,6 +1,14 @@
 #include "thread.h"
 #include <stdlib.h>
 
+/* The language adapters walk syntax trees recursively, one call per
+ * nesting level, so a file with one huge expression ("a" + "b" + ...
+ * thousands of terms long -- generated SQL, embedded data) overflowed
+ * the platform default (512 KB on macOS secondary threads, 1 MB on
+ * Windows) and killed the app with SIGBUS mid-build. Only reserved
+ * address space; pages are committed as the stack actually grows. */
+#define THREAD_STACK_SIZE ((size_t)64 * 1024 * 1024)
+
 #if defined(_WIN32)
 
 #define WIN32_LEAN_AND_MEAN
@@ -26,7 +34,9 @@ Thread *thread_start(ThreadFn fn, void *arg) {
     Thread *t = (Thread *)calloc(1, sizeof(Thread));
     t->fn = fn;
     t->arg = arg;
-    uintptr_t h = _beginthreadex(NULL, 0, trampoline, t, 0, NULL);
+    /* STACK_SIZE_PARAM_IS_A_RESERVATION: reserve the size, commit on use. */
+    uintptr_t h = _beginthreadex(NULL, (unsigned)THREAD_STACK_SIZE, trampoline, t,
+                                 STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
     if (h == 0) {
         free(t);
         return NULL;
@@ -73,7 +83,12 @@ Thread *thread_start(ThreadFn fn, void *arg) {
     t->fn = fn;
     t->arg = arg;
     pthread_mutex_init(&t->mu, NULL);
-    if (pthread_create(&t->tid, NULL, trampoline, t) != 0) {
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, THREAD_STACK_SIZE);
+    int rc = pthread_create(&t->tid, &attr, trampoline, t);
+    pthread_attr_destroy(&attr);
+    if (rc != 0) {
         pthread_mutex_destroy(&t->mu);
         free(t);
         return NULL;
