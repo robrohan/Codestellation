@@ -1562,20 +1562,20 @@ static void draw_canvas_layer(struct nk_context *ctx, int width, int height) {
                 cost_format_money(cost_estimate_ai(code, g_cost).cost, g_cost->currency, ai, sizeof(ai));
                 cost_format_count((double)code->sloc, lines, sizeof(lines));
                 len = snprintf(line, sizeof(line),
-                               "This canvas: %d code files \xC2\xB7 %s lines \xC2\xB7 by hand ~%s (%.1f person-months) "
-                               "\xC2\xB7 by AI ~%s",
+                               "%d code files \xC2\xB7 %s lines \xC2\xB7 human ~%s (%.1f person months) "
+                               "\xC2\xB7 LLM ~%s",
                                code->files, lines, hand, e.effort_months, ai);
                 if (g_cost->ai_share > 0.0 && len > 0 && (size_t)len < sizeof(line)) {
                     char value[32];
                     cost_format_money(cost_value(code, g_cost), g_cost->currency, value, sizeof(value));
-                    len += snprintf(line + len, sizeof(line) - (size_t)len, " \xC2\xB7 at %.0f%% AI ~%s",
+                    len += snprintf(line + len, sizeof(line) - (size_t)len, " \xC2\xB7 at %.0f%% LLM ~%s",
                                     g_cost->ai_share * 100.0, value);
                 }
             } else {
-                len = snprintf(line, sizeof(line), "This canvas: no code counted yet");
+                len = snprintf(line, sizeof(line), "No code counted yet");
             }
             if (g_canvas_size.unbuilt > 0 && len > 0 && (size_t)len < sizeof(line)) {
-                snprintf(line + len, sizeof(line) - (size_t)len, "   \xC2\xB7   %d %s not opened in 3D yet, not counted",
+                snprintf(line + len, sizeof(line) - (size_t)len, " \xC2\xB7 %d %s not counted",
                          g_canvas_size.unbuilt, g_canvas_size.unbuilt == 1 ? "code link" : "code links");
             }
             draw_text_at(c, 12.0f, status_y, line, g_theme.canvas_edge_label);
@@ -1584,7 +1584,7 @@ static void draw_canvas_layer(struct nk_context *ctx, int width, int height) {
 
         if (g_load_failed) {
             draw_text_at(c, 12.0f, status_y,
-                         "This canvas file could not be read \xE2\x80\x94 changes here will not be saved.",
+                         "File could not be read \xE2\x80\x94 changes here will not be saved.",
                          g_theme.box_preset[0]);
         }
     }

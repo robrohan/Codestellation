@@ -28,10 +28,10 @@ static bool draw_cost_settings(struct nk_context *ctx, CostParams *cost) {
     cost->mode = (CocomoMode)nk_combo(ctx, modes, COCOMO_MODE_COUNT, (int)cost->mode, 24, nk_vec2(200, 100));
 
     nk_layout_row_dynamic(ctx, 20, 1);
-    nk_label(ctx, "If written by AI", NK_TEXT_LEFT);
+    nk_label(ctx, "If written by LLM", NK_TEXT_LEFT);
     nk_layout_row_dynamic(ctx, 24, 1);
     double share = cost->ai_share * 100.0;
-    nk_property_double(ctx, "#AI share %:", 0.0, &share, 100.0, 5.0, 0.5f);
+    nk_property_double(ctx, "#LLM share %:", 0.0, &share, 100.0, 5.0, 0.5f);
     cost->ai_share = share / 100.0;
     nk_property_double(ctx, "#Price/M tokens:", 0.0, &cost->token_price, 1000.0, 0.5, 0.05f);
     nk_property_double(ctx, "#Reasoning x:", 1.0, &cost->reasoning_multiplier, 100000.0, 10.0, 1.0f);

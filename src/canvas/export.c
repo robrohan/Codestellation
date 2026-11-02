@@ -207,12 +207,12 @@ static void write_code_summary(Exporter *x, char *const *raw_dirs, size_t count)
         char hand[32], ai[32];
         cost_format_money(e.cost, cp->currency, hand, sizeof(hand));
         cost_format_money(cost_estimate_ai(&code, cp).cost, cp->currency, ai, sizeof(ai));
-        fprintf(x->f, "- Size: %lld lines of code in %d %s; ~%s to write by hand (%.1f person-months), ~%s by AI",
+        fprintf(x->f, "- Size: %lld lines of code in %d %s; ~%s human (%.1f person months), ~%s LLM",
                 code.sloc, code.files, code.files == 1 ? "file" : "files", hand, e.effort_months, ai);
         if (cp->ai_share > 0.0) {
             char value[32];
             cost_format_money(cost_value(&code, cp), cp->currency, value, sizeof(value));
-            fprintf(x->f, "; ~%s at %.0f%% AI", value, cp->ai_share * 100.0);
+            fprintf(x->f, "; ~%s at %.0f%% LLM", value, cp->ai_share * 100.0);
         }
         fputc('\n', x->f);
     }
@@ -395,14 +395,14 @@ static void write_cost_overview(Exporter *x) {
         fprintf(x->f, "All code linked from this map: %lld lines in %d %s.\n\n", code->sloc, code->files,
                 code->files == 1 ? "file" : "files");
         fprintf(x->f, "- **Value: ~%s** (%.0f%% written by AI)\n", value, cp->ai_share * 100.0);
-        fprintf(x->f, "- Written by hand: ~%s, %.1f person-months, %.1f months with %.1f people\n", hand,
+        fprintf(x->f, "- Human: ~%s, %.1f person months, %.1f months with %.1f people\n", hand,
                 e.effort_months, e.schedule_months, e.people);
-        fprintf(x->f, "- Written by AI: ~%s, %s tokens spent (%s kept x %.0f)\n\n", ai_cost, spent, kept,
+        fprintf(x->f, "- LLM: ~%s, %s tokens spent (%s kept x %.0f)\n\n", ai_cost, spent, kept,
                 ai.multiplier);
         fprintf(x->f,
-                "_By hand is Basic COCOMO (%s) at %s a year per developer with %.2gx overhead. By AI is tokens: "
+                "_Human is Basic COCOMO (%s) at %s a year per developer with %.2gx overhead. By LLM is tokens: "
                 "characters / %g per token, times a reasoning multiplier of %g scaled for complexity and size, at "
-                "%s%g per million tokens. Value prices the hand-written share with COCOMO and the rest with tokens. "
+                "%s%g per million tokens. Value prices the human share with COCOMO and the rest with tokens. "
                 "Rough guides to what the code would cost to produce, not quotes. Blank lines, comments, Markdown "
                 "and JSON aren't counted as code lines._\n\n",
                 cocomo_mode_name(cp->mode), salary, cp->overhead, cp->chars_per_token, cp->reasoning_multiplier,

@@ -251,23 +251,23 @@ static void cost_rows(struct nk_context *ctx, const NodeStats *st, const char *l
     snprintf(v, sizeof(v), "%lld", code.sloc);
     stat_row(ctx, "Code lines", v);
     if (code.sloc <= 0) {
-        stat_row(ctx, "By hand", "n/a (no code)");
-        stat_row(ctx, "By AI", "n/a");
+        stat_row(ctx, "Human", "n/a (no code)");
+        stat_row(ctx, "LLM", "n/a");
         stat_row(ctx, "Value", "n/a");
         return;
     }
     CostEstimate e = cost_estimate(code.sloc, cost);
     cost_format_money(e.cost, cost->currency, money, sizeof(money));
-    snprintf(v, sizeof(v), "~%s, %.1f person-months", money, e.effort_months);
-    stat_row(ctx, "By hand", v);
+    snprintf(v, sizeof(v), "~%s, %.1f person months", money, e.effort_months);
+    stat_row(ctx, "Human", v);
     AiEstimate ai = cost_estimate_ai(&code, cost);
     char tokens[32];
     cost_format_money(ai.cost, cost->currency, money, sizeof(money));
     cost_format_count(ai.tokens_spent, tokens, sizeof(tokens));
     snprintf(v, sizeof(v), "~%s, %s tokens", money, tokens);
-    stat_row(ctx, "By AI", v);
+    stat_row(ctx, "LLM", v);
     cost_format_money(cost_value(&code, cost), cost->currency, money, sizeof(money));
-    snprintf(v, sizeof(v), "~%s at %.0f%% AI", money, cost->ai_share * 100.0);
+    snprintf(v, sizeof(v), "~%s at %.0f%% LLM", money, cost->ai_share * 100.0);
     stat_row(ctx, "Value", v);
 }
 
@@ -459,8 +459,8 @@ static void draw_cost_summary(struct nk_context *ctx, const CodeTotals *code, co
     CostEstimate e = cost_estimate(code->sloc, cost);
     cost_format_money(e.cost, cost->currency, money, sizeof(money));
     snprintf(v, sizeof(v), "~%s (COCOMO, %s)", money, cocomo_mode_name(cost->mode));
-    stat_row(ctx, "By hand", v);
-    snprintf(v, sizeof(v), "%.1f person-months", e.effort_months);
+    stat_row(ctx, "Human", v);
+    snprintf(v, sizeof(v), "%.1f person months", e.effort_months);
     stat_row(ctx, "  Effort", v);
     snprintf(v, sizeof(v), "%.1f months with %.1f people", e.schedule_months, e.people);
     stat_row(ctx, "  Schedule", v);
@@ -469,14 +469,14 @@ static void draw_cost_summary(struct nk_context *ctx, const CodeTotals *code, co
     char kept[32], spent[32];
     cost_format_money(ai.cost, cost->currency, money, sizeof(money));
     snprintf(v, sizeof(v), "~%s at %s%g per million tokens", money, cost->currency, cost->token_price);
-    stat_row(ctx, "By AI", v);
+    stat_row(ctx, "LLM", v);
     cost_format_count(ai.tokens_kept, kept, sizeof(kept));
     cost_format_count(ai.tokens_spent, spent, sizeof(spent));
     snprintf(v, sizeof(v), "%s kept x %.0f = %s spent", kept, ai.multiplier, spent);
     stat_row(ctx, "  Tokens", v);
 
     cost_format_money(cost_value(code, cost), cost->currency, money, sizeof(money));
-    snprintf(v, sizeof(v), "~%s at %.0f%% AI", money, cost->ai_share * 100.0);
+    snprintf(v, sizeof(v), "~%s at %.0f%% LLM", money, cost->ai_share * 100.0);
     stat_row(ctx, "Value", v);
 }
 
