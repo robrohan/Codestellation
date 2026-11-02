@@ -2,6 +2,7 @@
 #include "canvas_doc.h"
 #include "../common/pathutil.h"
 #include <json.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -129,7 +130,7 @@ static bool get_num(struct json_object_s *obj, const char *key, double *out) {
     tmp[len] = '\0';
     char *end;
     double d = strtod(tmp, &end);
-    if (end == tmp) return false;
+    if (end == tmp || !isfinite(d)) return false; /* 1e999 parses as inf */
     *out = d;
     return true;
 }

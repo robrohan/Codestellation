@@ -209,8 +209,13 @@ bool graph_read_json(const char *path, Graph *out) {
             struct json_number_s *src_n = src_v ? json_value_as_number(src_v) : NULL;
             struct json_number_s *tgt_n = tgt_v ? json_value_as_number(tgt_v) : NULL;
             if (!src_n || !tgt_n) continue;
+            /* Endpoints index nodes everywhere downstream (layout, GL
+             * index buffers), so a hand-edited or truncated file can't
+             * be allowed to point past them. */
+            int src = atoi(src_n->number), tgt = atoi(tgt_n->number);
+            if (src < 0 || tgt < 0 || (size_t)src >= out->node_count || (size_t)tgt >= out->node_count) continue;
             char *k = json_str_dup(kind_v ? json_value_as_string(kind_v) : NULL);
-            graph_add_edge(out, atoi(src_n->number), atoi(tgt_n->number), k);
+            graph_add_edge(out, src, tgt, k);
             free(k);
         }
     }

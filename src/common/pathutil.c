@@ -120,7 +120,7 @@ char *path_clean(const char *path) {
 
     /* Root prefix kept verbatim: "/" or a Windows drive "C:\\" / "C:/". */
     size_t root = 0;
-    if (len >= 2 && path[1] == ':') root = 2;
+    if (len >= 2 && path[1] == ':' && ((path[0] | 0x20) >= 'a' && (path[0] | 0x20) <= 'z')) root = 2;
     if (root < len && is_sep(path[root])) root++;
 
     /* Segment start/length pairs, with ".." popping the previous one. */

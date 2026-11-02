@@ -475,16 +475,6 @@ bool notes_append_file_note(const char *path, NoteSet *existing,
     size_t raw_len;
     slurp_file(path, &raw, &raw_len);
 
-    NoteSet parsed;
-    notes_init(&parsed);
-    parse_notes_with_spans(raw, raw_len, &parsed);
-    char id[16];
-    snprintf(id, sizeof(id), "n%d", max_id_number(&parsed) + 1);
-    notes_free(&parsed);
-
-    char stamp[21];
-    now_iso8601(stamp);
-
     strbuf out;
     strbuf_init(&out);
     if (raw_len == 0) {
@@ -493,6 +483,19 @@ bool notes_append_file_note(const char *path, NoteSet *existing,
         strbuf_append_n(&out, raw, raw_len);
         if (!ends_with_separator(raw, raw_len)) strbuf_append(&out, "\n---\n");
     }
+
+    /* Ids come from the text with that closing separator in place: it
+     * can turn an unterminated hand-written note at the end into a real
+     * one, whose id the new note mustn't reuse. */
+    NoteSet parsed;
+    notes_init(&parsed);
+    parse_notes_with_spans(out.data, out.len, &parsed);
+    char id[16];
+    snprintf(id, sizeof(id), "n%d", max_id_number(&parsed) + 1);
+    notes_free(&parsed);
+
+    char stamp[21];
+    now_iso8601(stamp);
     char *core = serialize_file_core(id, file_path, has_hash, file_hash, has_line, line, stamp, stamp, body);
     strbuf_append(&out, core);
     strbuf_append(&out, "---\n");
@@ -512,16 +515,6 @@ bool notes_append_group_note(const char *path, NoteSet *existing,
     size_t raw_len;
     slurp_file(path, &raw, &raw_len);
 
-    NoteSet parsed;
-    notes_init(&parsed);
-    parse_notes_with_spans(raw, raw_len, &parsed);
-    char id[16];
-    snprintf(id, sizeof(id), "g%d", max_id_number(&parsed) + 1);
-    notes_free(&parsed);
-
-    char stamp[21];
-    now_iso8601(stamp);
-
     strbuf out;
     strbuf_init(&out);
     if (raw_len == 0) {
@@ -530,6 +523,19 @@ bool notes_append_group_note(const char *path, NoteSet *existing,
         strbuf_append_n(&out, raw, raw_len);
         if (!ends_with_separator(raw, raw_len)) strbuf_append(&out, "\n---\n");
     }
+
+    /* Ids come from the text with that closing separator in place: it
+     * can turn an unterminated hand-written note at the end into a real
+     * one, whose id the new note mustn't reuse. */
+    NoteSet parsed;
+    notes_init(&parsed);
+    parse_notes_with_spans(out.data, out.len, &parsed);
+    char id[16];
+    snprintf(id, sizeof(id), "g%d", max_id_number(&parsed) + 1);
+    notes_free(&parsed);
+
+    char stamp[21];
+    now_iso8601(stamp);
     char *core = serialize_group_core(id, paths, path_count, stamp, stamp, body);
     strbuf_append(&out, core);
     strbuf_append(&out, "---\n");

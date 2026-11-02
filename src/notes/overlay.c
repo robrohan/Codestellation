@@ -2,6 +2,7 @@
 #include "filehash.h"
 #include "../common/pathutil.h"
 #include <json.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -65,6 +66,12 @@ static void write_escaped(FILE *f, const char *s) {
     fputc('"', f);
 }
 
+/* %g prints inf/nan, which isn't JSON: one bad position would make the
+ * whole file unreadable on the next launch. */
+static double finite_or_zero(float v) {
+    return isfinite(v) ? v : 0.0;
+}
+
 bool overlay_write_json(const Overlay *ov, const char *path) {
     FILE *f = fopen(path, "w");
     if (!f) return false;
@@ -77,7 +84,8 @@ bool overlay_write_json(const Overlay *ov, const char *path) {
         fprintf(f, "{\"path\": ");
         write_escaped(f, ov->entries[i].path);
         fprintf(f, ", \"hash\": \"%s\", \"x\": %g, \"y\": %g, \"z\": %g}",
-                hex, ov->entries[i].x, ov->entries[i].y, ov->entries[i].z);
+                hex, finite_or_zero(ov->entries[i].x), finite_or_zero(ov->entries[i].y),
+                finite_or_zero(ov->entries[i].z));
     }
     fprintf(f, "]}\n");
 
@@ -106,7 +114,8 @@ static struct json_value_s *obj_get(struct json_object_s *obj, const char *key) 
 static float obj_get_float(struct json_object_s *obj, const char *key) {
     struct json_value_s *v = obj_get(obj, key);
     struct json_number_s *n = v ? json_value_as_number(v) : NULL;
-    return n ? (float)atof(n->number) : 0.0f;
+    float f = n ? (float)atof(n->number) : 0.0f;
+    return isfinite(f) ? f : 0.0f; /* 1e999 parses as inf */
 }
 
 bool overlay_read_json(const char *path, Overlay *out) {
